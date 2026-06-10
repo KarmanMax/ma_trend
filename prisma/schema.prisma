@@ -1,0 +1,118 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model BacktestRun {
+  id             String   @id @default(cuid())
+  symbol         String
+  timeframe      String
+  strategyType   String
+  status         String
+  initialCapital Float
+  feeRate        Float
+  slippageRate   Float
+  startTime      DateTime
+  endTime        DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  strategyConfig StrategyConfig?
+  metrics        Metrics?
+  trades         Trade[]
+  chartPoints    ChartPoint[]
+  equityPoints   EquityPoint[]
+  drawdownPoints DrawdownPoint[]
+
+  @@index([createdAt])
+  @@index([symbol, timeframe])
+}
+
+model StrategyConfig {
+  id            String @id @default(cuid())
+  backtestRunId String @unique
+  type          String
+  configJson    String
+
+  backtestRun BacktestRun @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+}
+
+model Trade {
+  id            String   @id @default(cuid())
+  backtestRunId String
+  symbol        String
+  side          String
+  entryTime     DateTime
+  exitTime      DateTime?
+  entryPrice    Float
+  exitPrice     Float?
+  quantity      Float
+  grossPnl      Float?
+  netPnl        Float?
+  fee           Float
+  exitReason    String?
+
+  backtestRun BacktestRun @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+
+  @@index([backtestRunId])
+}
+
+model Metrics {
+  id            String @id @default(cuid())
+  backtestRunId String @unique
+  totalReturn   Float
+  cagr          Float
+  maxDrawdown   Float
+  sharpeRatio   Float
+  winRate       Float
+  profitFactor  Float
+  tradeCount    Int
+
+  backtestRun BacktestRun @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+}
+
+model EquityPoint {
+  id            String   @id @default(cuid())
+  backtestRunId String
+  time          DateTime
+  equity        Float
+
+  backtestRun BacktestRun @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+
+  @@index([backtestRunId, time])
+}
+
+model ChartPoint {
+  id            String   @id @default(cuid())
+  backtestRunId String
+  time          DateTime
+  open          Float
+  high          Float
+  low           Float
+  close         Float
+  volume        Float    @default(0)
+  emaFast       Float?
+  emaSlow       Float?
+  atr           Float?
+  adx           Float?
+  volumeMa      Float?
+
+  backtestRun BacktestRun @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+
+  @@index([backtestRunId, time])
+}
+
+model DrawdownPoint {
+  id            String   @id @default(cuid())
+  backtestRunId String
+  time          DateTime
+  drawdown      Float
+
+  backtestRun BacktestRun @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+
+  @@index([backtestRunId, time])
+}

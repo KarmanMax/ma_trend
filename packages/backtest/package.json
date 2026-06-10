@@ -1,0 +1,26 @@
+{
+  "name": "@trend-trade/backtest",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@trend-trade/execution": "workspace:*",
+    "@trend-trade/indicator": "workspace:*",
+    "@trend-trade/market-data": "workspace:*",
+    "@trend-trade/portfolio": "workspace:*",
+    "@trend-trade/shared": "workspace:*",
+    "@trend-trade/strategy": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.1"
+  }
+}
