@@ -1,4 +1,4 @@
-import { supportedTimeframes, type BacktestConfig, type Timeframe } from "@trend-trade/shared";
+import { supportedSymbols, supportedTimeframes, type BacktestConfig, type SymbolCode, type Timeframe } from "@trend-trade/shared";
 import {
   CandlestickSeries,
   ColorType,
@@ -26,7 +26,7 @@ import { createBacktest, getBacktest, listBacktests, type ApiBacktestDetail, typ
 import { formatCurrency, formatDateTime, formatNumber, formatPercent } from "./lib/format";
 
 const defaultConfig: BacktestConfig = {
-  symbol: "ETHUSDT",
+  symbol: "ETH",
   timeframe: "1h",
   startTime: defaultStartTime(),
   endTime: defaultEndTime(),
@@ -35,8 +35,7 @@ const defaultConfig: BacktestConfig = {
   slippageRate: 0.0005,
   strategy: {
     type: "EMA_TREND",
-    emaFast: 50,
-    emaSlow: 200,
+    trendEmaPeriod: 200,
     atrPeriod: 14,
     atrMultiplier: 2,
     atrStopEnabled: true,
@@ -73,6 +72,54 @@ const timeframeLabels: Record<Timeframe, string> = {
   "2h": "2H",
   "4h": "4H",
   "1d": "1D"
+};
+
+const symbolLabels: Record<SymbolCode, string> = {
+  BTC: "BTC",
+  ETH: "ETH",
+  SOL: "SOL",
+  BNB: "BNB",
+  ENA: "ENA",
+  SUI: "SUI",
+  UNI: "UNI",
+  AAVE: "AAVE",
+  LINK: "LINK",
+  ONDO: "ONDO",
+  HYPE: "HYPE",
+  VVV: "VVV",
+  NEAR: "NEAR",
+  MORPHO: "MORPHO",
+  RAY: "RAY",
+  JUP: "JUP",
+  KMNO: "KMNO",
+  CAKE: "CAKE",
+  LDO: "LDO",
+  SKHYNIX: "SK hynix",
+  MU: "Micron (MU)",
+  MRVL: "MRVL",
+  PLTR: "PLTR",
+  HOOD: "HOOD",
+  SOFI: "SOFI",
+  SNDK: "SNDK",
+  CRWV: "CRWV",
+  NBIS: "NBIS",
+  IREN: "IREN",
+  AVGO: "AVGO",
+  INTC: "INTC",
+  ARM: "ARM",
+  AMD: "AMD",
+  XIAOMI: "Xiaomi (01810.HK)",
+  BABA: "BABA",
+  BIDU: "BIDU",
+  "00700": "Tencent (00700.HK)",
+  "03690": "Meituan (03690.HK)",
+  JD: "JD",
+  BILI: "BILI",
+  PDD: "PDD",
+  TSM: "TSM",
+  TCOM: "TCOM",
+  FUTU: "FUTU",
+  PONY: "PONY"
 };
 
 export function App() {
@@ -141,7 +188,7 @@ export function App() {
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div>
             <h1 className="text-xl font-semibold tracking-normal">Trend Trade</h1>
-            <p className="text-sm text-muted">ETHUSDT EMA trend backtesting workstation</p>
+            <p className="text-sm text-muted">Multi-asset EMA trend backtesting workstation</p>
           </div>
           <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted">
             <Activity size={16} />
@@ -158,8 +205,16 @@ export function App() {
           </div>
           <div className="grid gap-4">
             <Field label="Symbol">
-              <select className="input" value={form.symbol} disabled>
-                <option value="ETHUSDT">ETHUSDT</option>
+              <select
+                className="input"
+                value={form.symbol}
+                onChange={(event) => setForm({ ...form, symbol: event.target.value as SymbolCode })}
+              >
+                {supportedSymbols.map((symbol) => (
+                  <option key={symbol} value={symbol}>
+                    {symbolLabels[symbol]}
+                  </option>
+                ))}
               </select>
             </Field>
             <Field label="Timeframe">
@@ -243,8 +298,12 @@ export function App() {
                 </Field>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <NumberField compact label="EMA Fast" value={form.strategy.emaFast} onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, emaFast: value } })} />
-                <NumberField compact label="EMA Slow" value={form.strategy.emaSlow} onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, emaSlow: value } })} />
+                <NumberField
+                  compact
+                  label="Trend EMA"
+                  value={form.strategy.trendEmaPeriod}
+                  onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, trendEmaPeriod: value } })}
+                />
                 <CheckboxField
                   label="ATR Stop"
                   checked={form.strategy.atrStopEnabled}
@@ -470,13 +529,7 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
       wickDownColor: "#b42318",
       borderVisible: false
     });
-    const emaFastSeries = chart.addSeries(LineSeries, {
-      color: "#2563eb",
-      lineWidth: 2,
-      priceLineVisible: false,
-      lastValueVisible: false
-    });
-    const emaSlowSeries = chart.addSeries(LineSeries, {
+    const trendEmaSeries = chart.addSeries(LineSeries, {
       color: "#9333ea",
       lineWidth: 2,
       priceLineVisible: false,
@@ -503,12 +556,9 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
       low: point.low,
       close: point.close
     }));
-    const emaFast = result.chartPoints
-      .filter((point) => typeof point.emaFast === "number")
-      .map((point) => ({ time: toChartTime(point.time), value: point.emaFast as number }));
-    const emaSlow = result.chartPoints
-      .filter((point) => typeof point.emaSlow === "number")
-      .map((point) => ({ time: toChartTime(point.time), value: point.emaSlow as number }));
+    const trendEma = result.chartPoints
+      .filter((point) => typeof point.trendEma === "number")
+      .map((point) => ({ time: toChartTime(point.time), value: point.trendEma as number }));
     const volumes = result.chartPoints.map((point) => ({
       time: toChartTime(point.time),
       value: point.volume,
@@ -516,8 +566,7 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
     }));
 
     candleSeries.setData(candles);
-    emaFastSeries.setData(emaFast);
-    emaSlowSeries.setData(emaSlow);
+    trendEmaSeries.setData(trendEma);
     volumeSeries.setData(volumes);
 
     createSeriesMarkers(
@@ -576,8 +625,7 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
   return (
     <ChartPanel title="K-Line Strategy View" icon={<BarChart3 size={18} />}>
       <div className="mb-3 flex flex-wrap gap-4 text-xs text-muted">
-        <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#2563eb]" /> EMA Fast</span>
-        <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#9333ea]" /> EMA Slow</span>
+        <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#9333ea]" /> Trend EMA</span>
         <span className="inline-flex items-center gap-1"><span className="h-2 w-4 bg-[#98a2b3]" /> Volume</span>
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-positive" /> Buy</span>
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-negative" /> Short</span>

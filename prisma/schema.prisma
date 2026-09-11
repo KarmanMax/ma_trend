@@ -95,6 +95,7 @@ model ChartPoint {
   low           Float
   close         Float
   volume        Float    @default(0)
+  trendEma      Float?
   emaFast       Float?
   emaSlow       Float?
   atr           Float?

@@ -1,6 +1,52 @@
 import { z } from "zod";
 
-export const supportedSymbols = ["ETHUSDT"] as const;
+export const supportedSymbols = [
+  "BTC",
+  "ETH",
+  "SOL",
+  "BNB",
+  "ENA",
+  "SUI",
+  "UNI",
+  "AAVE",
+  "LINK",
+  "ONDO",
+  "HYPE",
+  "VVV",
+  "NEAR",
+  "MORPHO",
+  "RAY",
+  "JUP",
+  "KMNO",
+  "CAKE",
+  "LDO",
+  "SKHYNIX",
+  "MU",
+  "MRVL",
+  "PLTR",
+  "HOOD",
+  "SOFI",
+  "SNDK",
+  "CRWV",
+  "NBIS",
+  "IREN",
+  "AVGO",
+  "INTC",
+  "ARM",
+  "AMD",
+  "XIAOMI",
+  "BABA",
+  "BIDU",
+  "00700",
+  "03690",
+  "JD",
+  "BILI",
+  "PDD",
+  "TSM",
+  "TCOM",
+  "FUTU",
+  "PONY"
+] as const;
 export const supportedTimeframes = ["1m", "2m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"] as const;
 
 export type SymbolCode = (typeof supportedSymbols)[number];
@@ -85,8 +131,7 @@ export type BacktestChartPoint = {
   low: number;
   close: number;
   volume: number;
-  emaFast?: number;
-  emaSlow?: number;
+  trendEma?: number;
   atr?: number;
   adx?: number;
   volumeMa?: number;
@@ -94,8 +139,9 @@ export type BacktestChartPoint = {
 
 export type EmaTrendStrategyConfig = {
   type: "EMA_TREND";
-  emaFast: number;
-  emaSlow: number;
+  trendEmaPeriod: number;
+  emaFast?: number;
+  emaSlow?: number;
   atrPeriod: number;
   atrMultiplier: number;
   atrStopEnabled: boolean;
@@ -143,8 +189,9 @@ export const backtestConfigSchema = z.object({
   slippageRate: z.number().min(0).max(0.1),
   strategy: z.object({
     type: z.literal("EMA_TREND"),
-    emaFast: z.number().int().positive(),
-    emaSlow: z.number().int().positive(),
+    trendEmaPeriod: z.number().int().positive().optional(),
+    emaFast: z.number().int().positive().optional(),
+    emaSlow: z.number().int().positive().optional(),
     atrPeriod: z.number().int().positive(),
     atrMultiplier: z.number().positive(),
     atrStopEnabled: z.boolean().default(true),
@@ -156,10 +203,10 @@ export const backtestConfigSchema = z.object({
     volumeFilterEnabled: z.boolean().default(true),
     direction: z.enum(["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT"]),
     exitTrigger: z.enum(["EMA", "NONE"]).default("EMA")
-  })
-}).refine((value) => value.strategy.emaFast < value.strategy.emaSlow, {
-  message: "EMA fast period must be lower than EMA slow period",
-  path: ["strategy", "emaFast"]
+  }).transform((value) => ({
+    ...value,
+    trendEmaPeriod: value.trendEmaPeriod ?? value.emaSlow ?? 200
+  }))
 }).refine((value) => Date.parse(value.startTime) < Date.parse(value.endTime), {
   message: "startTime must be before endTime",
   path: ["startTime"]

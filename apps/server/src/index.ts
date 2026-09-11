@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { BacktestEngine } from "@trend-trade/backtest";
-import { BinanceMarketDataProvider } from "@trend-trade/market-data";
+import { RoutedMarketDataProvider } from "@trend-trade/market-data";
 import { backtestConfigSchema, type BacktestConfig, type BacktestResult } from "@trend-trade/shared";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -31,7 +31,7 @@ app.get("/api/health", (_request, response) => {
 app.post("/api/backtests", async (request, response, next) => {
   try {
     const config = backtestConfigSchema.parse(request.body) as BacktestConfig;
-    const engine = new BacktestEngine(new BinanceMarketDataProvider());
+    const engine = new BacktestEngine(new RoutedMarketDataProvider());
     const result = await engine.run(config);
     const saved = await saveBacktestResult(config, result);
     response.status(201).json(saved);
@@ -125,8 +125,7 @@ app.get("/api/backtests/:id", async (request, response, next) => {
         low: point.low,
         close: point.close,
         volume: point.volume,
-        emaFast: point.emaFast,
-        emaSlow: point.emaSlow,
+        trendEma: point.trendEma,
         atr: point.atr,
         adx: point.adx,
         volumeMa: point.volumeMa
@@ -201,8 +200,7 @@ async function saveBacktestResult(config: BacktestConfig, result: BacktestResult
           low: point.low,
           close: point.close,
           volume: point.volume,
-          emaFast: point.emaFast,
-          emaSlow: point.emaSlow,
+          trendEma: point.trendEma,
           atr: point.atr,
           adx: point.adx,
           volumeMa: point.volumeMa

@@ -37,8 +37,7 @@ export type ApiBacktestDetail = {
     low: number;
     close: number;
     volume: number;
-    emaFast?: number | null;
-    emaSlow?: number | null;
+    trendEma?: number | null;
     atr?: number | null;
     adx?: number | null;
     volumeMa?: number | null;

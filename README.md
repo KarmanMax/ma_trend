@@ -1,6 +1,6 @@
 # Trend Trade
 
-可扩展的 TypeScript 量化交易回测平台 MVP。当前版本支持 `ETHUSDT`、常用分钟/小时/日线周期、EMA 趋势跟踪策略，并保留扩展到网格策略、多标的、参数优化、模拟盘和 Binance 实盘交易的接口边界。
+可扩展的 TypeScript 量化交易回测平台 MVP。当前版本支持多 crypto 标的、`SKHYNIX`、`MU`、常用分钟/小时/日线周期、EMA 趋势跟踪策略，并保留扩展到网格策略、多标的、参数优化、模拟盘和 Binance 实盘交易的接口边界。
 
 ## Architecture
 
@@ -30,7 +30,7 @@ apps/
 
 packages/
   shared/       shared types, DTO, zod schema
-  market-data/  MarketDataProvider and Binance provider
+  market-data/  MarketDataProvider, Binance/Yahoo providers, and symbol routing
   indicator/    EMA, ATR, drawdown, metrics
   strategy/     Strategy interface and EMA trend strategy
   execution/    simulated fills, fees, slippage, ATR stop
@@ -45,7 +45,51 @@ prisma/
 
 Symbol:
 
-- `ETHUSDT`
+- `BTC`
+- `ETH`
+- `SOL`
+- `BNB`
+- `ENA`
+- `SUI`
+- `UNI`
+- `AAVE`
+- `LINK`
+- `ONDO`
+- `HYPE`
+- `VVV`
+- `NEAR`
+- `MORPHO`
+- `RAY`
+- `JUP`
+- `KMNO`
+- `CAKE`
+- `LDO`
+- `SKHYNIX`
+- `MU`
+- `MRVL`
+- `PLTR`
+- `HOOD`
+- `SOFI`
+- `SNDK`
+- `CRWV`
+- `NBIS`
+- `IREN`
+- `AVGO`
+- `INTC`
+- `ARM`
+- `AMD`
+- `XIAOMI` (Yahoo: `1810.HK`)
+- `BABA`
+- `BIDU`
+- `00700` (Yahoo: `0700.HK`)
+- `03690` (Yahoo: `3690.HK`)
+- `JD`
+- `BILI`
+- `PDD`
+- `TSM`
+- `TCOM`
+- `FUTU`
+- `PONY`
 
 Timeframes:
 
@@ -61,8 +105,7 @@ Timeframes:
 
 Strategy:
 
-- EMA fast: `50`
-- EMA slow: `200`
+- Trend EMA period: `200`
 - ATR period: `14`
 - ATR multiplier: `2`
 - ATR stop enabled: `true`
@@ -77,8 +120,8 @@ Strategy:
 
 Rules:
 
-- EMA50 crosses above EMA200 -> open long, or close short in `SHORT_ONLY`
-- EMA50 crosses below EMA200 -> open short, or close long in `LONG_ONLY`
+- Close crosses above trend EMA -> open long, or close short in `SHORT_ONLY`
+- Close crosses below trend EMA -> open short, or close long in `LONG_ONLY`
 - With `exitTrigger = EMA`, a reverse EMA signal closes the existing position and opens the new opposite position
 - With `exitTrigger = NONE`, reverse EMA signals do not close an existing position
 - EMA exits do not require ATR, ADX, or volume filters to be enabled or warmed up
@@ -94,7 +137,7 @@ Runs and saves a backtest.
 
 ```json
 {
-  "symbol": "ETHUSDT",
+  "symbol": "ETH",
   "timeframe": "1h",
   "startTime": "2023-01-01T00:00:00.000Z",
   "endTime": "2024-01-01T00:00:00.000Z",
@@ -103,8 +146,7 @@ Runs and saves a backtest.
   "slippageRate": 0.0005,
   "strategy": {
     "type": "EMA_TREND",
-    "emaFast": 50,
-    "emaSlow": 200,
+    "trendEmaPeriod": 200,
     "atrPeriod": 14,
     "atrMultiplier": 2,
     "direction": "LONG_ONLY"

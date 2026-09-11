@@ -37,16 +37,14 @@ export class StrategyRegistry implements StrategyFactory {
 export class EmaTrendStrategy implements Strategy<EmaTrendStrategyConfig> {
   readonly id = "EMA_TREND";
   readonly name = "EMA Trend Following";
-  private readonly emaFastSeries: Array<number | null>;
-  private readonly emaSlowSeries: Array<number | null>;
+  private readonly trendEmaSeries: Array<number | null>;
   private readonly atrSeries: Array<number | null>;
   private readonly adxSeries: Array<number | null>;
   private readonly volumeMaSeries: Array<number | null>;
 
   constructor(private readonly candles: Candle[], private readonly config: EmaTrendStrategyConfig) {
     const closes = candles.map((candle) => candle.close);
-    this.emaFastSeries = ema(closes, config.emaFast);
-    this.emaSlowSeries = ema(closes, config.emaSlow);
+    this.trendEmaSeries = ema(closes, config.trendEmaPeriod);
     this.atrSeries = atr(candles, config.atrPeriod);
     this.adxSeries = adx(candles, config.adxPeriod);
     this.volumeMaSeries = sma(candles.map((candle) => candle.volume), config.volumeMaPeriod);
@@ -58,20 +56,20 @@ export class EmaTrendStrategy implements Strategy<EmaTrendStrategyConfig> {
       return { type: "HOLD", reason: "Waiting for indicator warmup" };
     }
 
-    const previousFast = this.emaFastSeries[index - 1];
-    const previousSlow = this.emaSlowSeries[index - 1];
-    const currentFast = this.emaFastSeries[index];
-    const currentSlow = this.emaSlowSeries[index];
+    const previousCandle = this.candles[index - 1];
+    const currentCandle = this.candles[index];
+    const previousTrendEma = this.trendEmaSeries[index - 1];
+    const currentTrendEma = this.trendEmaSeries[index];
     const currentAtr = this.atrSeries[index];
     const currentAdx = this.adxSeries[index];
     const currentVolumeMa = this.volumeMaSeries[index];
 
-    if ([previousFast, previousSlow, currentFast, currentSlow].some((value) => value === null)) {
+    if ([previousTrendEma, currentTrendEma].some((value) => value === null)) {
       return { type: "HOLD", reason: "Waiting for indicator warmup" };
     }
 
-    const crossedUp = previousFast! <= previousSlow! && currentFast! > currentSlow!;
-    const crossedDown = previousFast! >= previousSlow! && currentFast! < currentSlow!;
+    const crossedUp = previousCandle.close <= previousTrendEma! && currentCandle.close > currentTrendEma!;
+    const crossedDown = previousCandle.close >= previousTrendEma! && currentCandle.close < currentTrendEma!;
     const candle = this.candles[index];
 
     if (crossedUp) {
@@ -79,7 +77,7 @@ export class EmaTrendStrategy implements Strategy<EmaTrendStrategyConfig> {
         return this.config.exitTrigger === "EMA"
           ? {
               type: "CLOSE_SHORT",
-              reason: `EMA${this.config.emaFast} crossed above EMA${this.config.emaSlow}`
+              reason: `Close crossed above EMA${this.config.trendEmaPeriod}`
             }
           : { type: "HOLD", reason: "EMA exit trigger disabled" };
       }
@@ -93,7 +91,7 @@ export class EmaTrendStrategy implements Strategy<EmaTrendStrategyConfig> {
 
       return {
         type: "BUY",
-        reason: `EMA${this.config.emaFast} crossed above EMA${this.config.emaSlow}`,
+        reason: `Close crossed above EMA${this.config.trendEmaPeriod}`,
         stopPrice: this.config.atrStopEnabled && currentAtr !== null ? candle.close - currentAtr * this.config.atrMultiplier : undefined,
         allowPositionFlip: this.config.exitTrigger === "EMA"
       };
@@ -104,7 +102,7 @@ export class EmaTrendStrategy implements Strategy<EmaTrendStrategyConfig> {
         return this.config.exitTrigger === "EMA"
           ? {
               type: "CLOSE_LONG",
-              reason: `EMA${this.config.emaFast} crossed below EMA${this.config.emaSlow}`
+              reason: `Close crossed below EMA${this.config.trendEmaPeriod}`
             }
           : { type: "HOLD", reason: "EMA exit trigger disabled" };
       }
@@ -118,13 +116,13 @@ export class EmaTrendStrategy implements Strategy<EmaTrendStrategyConfig> {
 
       return {
         type: "SELL_SHORT",
-        reason: `EMA${this.config.emaFast} crossed below EMA${this.config.emaSlow}`,
+        reason: `Close crossed below EMA${this.config.trendEmaPeriod}`,
         stopPrice: this.config.atrStopEnabled && currentAtr !== null ? candle.close + currentAtr * this.config.atrMultiplier : undefined,
         allowPositionFlip: this.config.exitTrigger === "EMA"
       };
     }
 
-    return { type: "HOLD", reason: "No crossover" };
+    return { type: "HOLD", reason: "No trend EMA cross" };
   }
 
   private getEntryFilterFailure(
