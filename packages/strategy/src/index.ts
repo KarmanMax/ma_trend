@@ -44,7 +44,7 @@ export class EmaTrendStrategy implements Strategy<EmaTrendStrategyConfig> {
 
   constructor(private readonly candles: Candle[], private readonly config: EmaTrendStrategyConfig) {
     const closes = candles.map((candle) => candle.close);
-    this.trendEmaSeries = ema(closes, config.trendEmaPeriod);
+    this.trendEmaSeries = (config.trendMaType === "MA" ? sma : ema)(closes, config.trendEmaPeriod);
     this.atrSeries = atr(candles, config.atrPeriod);
     this.adxSeries = adx(candles, config.adxPeriod);
     this.volumeMaSeries = sma(candles.map((candle) => candle.volume), config.volumeMaPeriod);
@@ -77,7 +77,7 @@ export class EmaTrendStrategy implements Strategy<EmaTrendStrategyConfig> {
         return this.config.exitTrigger === "EMA"
           ? {
               type: "CLOSE_SHORT",
-              reason: `Close crossed above EMA${this.config.trendEmaPeriod}`
+              reason: `Close crossed above ${this.config.trendMaType ?? "EMA"}${this.config.trendEmaPeriod}`
             }
           : { type: "HOLD", reason: "EMA exit trigger disabled" };
       }
@@ -91,7 +91,7 @@ export class EmaTrendStrategy implements Strategy<EmaTrendStrategyConfig> {
 
       return {
         type: "BUY",
-        reason: `Close crossed above EMA${this.config.trendEmaPeriod}`,
+        reason: `Close crossed above ${this.config.trendMaType ?? "EMA"}${this.config.trendEmaPeriod}`,
         stopPrice: this.config.atrStopEnabled && currentAtr !== null ? candle.close - currentAtr * this.config.atrMultiplier : undefined,
         allowPositionFlip: this.config.exitTrigger === "EMA"
       };
@@ -102,7 +102,7 @@ export class EmaTrendStrategy implements Strategy<EmaTrendStrategyConfig> {
         return this.config.exitTrigger === "EMA"
           ? {
               type: "CLOSE_LONG",
-              reason: `Close crossed below EMA${this.config.trendEmaPeriod}`
+              reason: `Close crossed below ${this.config.trendMaType ?? "EMA"}${this.config.trendEmaPeriod}`
             }
           : { type: "HOLD", reason: "EMA exit trigger disabled" };
       }
@@ -116,13 +116,13 @@ export class EmaTrendStrategy implements Strategy<EmaTrendStrategyConfig> {
 
       return {
         type: "SELL_SHORT",
-        reason: `Close crossed below EMA${this.config.trendEmaPeriod}`,
+        reason: `Close crossed below ${this.config.trendMaType ?? "EMA"}${this.config.trendEmaPeriod}`,
         stopPrice: this.config.atrStopEnabled && currentAtr !== null ? candle.close + currentAtr * this.config.atrMultiplier : undefined,
         allowPositionFlip: this.config.exitTrigger === "EMA"
       };
     }
 
-    return { type: "HOLD", reason: "No trend EMA cross" };
+    return { type: "HOLD", reason: "No trend moving average cross" };
   }
 
   private getEntryFilterFailure(

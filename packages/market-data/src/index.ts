@@ -75,7 +75,16 @@ const yahooSymbolMap: Partial<Record<SymbolCode, string>> = {
   TSM: "TSM",
   TCOM: "TCOM",
   FUTU: "FUTU",
-  PONY: "PONY"
+  PONY: "PONY",
+  QQQ: "QQQ",
+  SPY: "SPY",
+  VGT: "VGT",
+  SMH: "SMH",
+  SOXX: "SOXX",
+  IGV: "IGV",
+  XBI: "XBI",
+  DRAM: "DRAM",
+  LYTE: "LYTE"
 };
 
 const timeframeMs: Record<Timeframe, number> = {

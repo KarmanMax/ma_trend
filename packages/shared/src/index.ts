@@ -45,7 +45,16 @@ export const supportedSymbols = [
   "TSM",
   "TCOM",
   "FUTU",
-  "PONY"
+  "PONY",
+  "QQQ",
+  "SPY",
+  "VGT",
+  "SMH",
+  "SOXX",
+  "IGV",
+  "XBI",
+  "DRAM",
+  "LYTE"
 ] as const;
 export const supportedTimeframes = ["1m", "2m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"] as const;
 
@@ -140,6 +149,7 @@ export type BacktestChartPoint = {
 export type EmaTrendStrategyConfig = {
   type: "EMA_TREND";
   trendEmaPeriod: number;
+  trendMaType?: "MA" | "EMA";
   emaFast?: number;
   emaSlow?: number;
   atrPeriod: number;
@@ -190,11 +200,12 @@ export const backtestConfigSchema = z.object({
   strategy: z.object({
     type: z.literal("EMA_TREND"),
     trendEmaPeriod: z.number().int().positive().optional(),
+    trendMaType: z.enum(["MA", "EMA"]).default("MA"),
     emaFast: z.number().int().positive().optional(),
     emaSlow: z.number().int().positive().optional(),
     atrPeriod: z.number().int().positive(),
     atrMultiplier: z.number().positive(),
-    atrStopEnabled: z.boolean().default(true),
+    atrStopEnabled: z.boolean().default(false),
     adxPeriod: z.number().int().positive(),
     adxThreshold: z.number().min(0).max(100),
     adxFilterEnabled: z.boolean().default(true),

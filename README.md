@@ -43,6 +43,8 @@ prisma/
 
 ## MVP Strategy
 
+Trend indicator: `MA` (simple moving average) or `EMA` (default), with a configurable period (default 200). Signals use closing-price crossings of the selected average, including reverse exits and position flips. Legacy configs default to EMA. For storage compatibility, `trendEmaPeriod`, `trendEma`, and the `EMA` exit-trigger value retain their names; `trendMaType` determines the actual average used.
+
 Symbol:
 
 - `BTC`
@@ -90,6 +92,15 @@ Symbol:
 - `TCOM`
 - `FUTU`
 - `PONY`
+- `QQQ`
+- `SPY`
+- `VGT`
+- `SMH`
+- `SOXX`
+- `IGV`
+- `XBI`
+- `DRAM`
+- `LYTE`
 
 Timeframes:
 

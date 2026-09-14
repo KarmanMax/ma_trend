@@ -27,7 +27,7 @@ import { formatCurrency, formatDateTime, formatNumber, formatPercent } from "./l
 
 const defaultConfig: BacktestConfig = {
   symbol: "ETH",
-  timeframe: "1h",
+  timeframe: "1d",
   startTime: defaultStartTime(),
   endTime: defaultEndTime(),
   initialCapital: 10000,
@@ -36,9 +36,10 @@ const defaultConfig: BacktestConfig = {
   strategy: {
     type: "EMA_TREND",
     trendEmaPeriod: 200,
+    trendMaType: "MA",
     atrPeriod: 14,
     atrMultiplier: 2,
-    atrStopEnabled: true,
+    atrStopEnabled: false,
     adxPeriod: 14,
     adxThreshold: 20,
     adxFilterEnabled: true,
@@ -58,7 +59,7 @@ function defaultEndTime(): string {
 
 function defaultStartTime(): string {
   const start = new Date(defaultEndTime());
-  start.setUTCFullYear(start.getUTCFullYear() - 1);
+  start.setUTCFullYear(start.getUTCFullYear() - 8);
   return start.toISOString();
 }
 
@@ -119,7 +120,16 @@ const symbolLabels: Record<SymbolCode, string> = {
   TSM: "TSM",
   TCOM: "TCOM",
   FUTU: "FUTU",
-  PONY: "PONY"
+  PONY: "PONY",
+  QQQ: "QQQ",
+  SPY: "SPY",
+  VGT: "VGT",
+  SMH: "SMH",
+  SOXX: "SOXX",
+  IGV: "IGV",
+  XBI: "XBI",
+  DRAM: "DRAM",
+  LYTE: "LYTE"
 };
 
 export function App() {
@@ -188,7 +198,7 @@ export function App() {
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div>
             <h1 className="text-xl font-semibold tracking-normal">Trend Trade</h1>
-            <p className="text-sm text-muted">Multi-asset EMA trend backtesting workstation</p>
+            <p className="text-sm text-muted">Multi-asset trend backtesting workstation</p>
           </div>
           <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted">
             <Activity size={16} />
@@ -255,7 +265,19 @@ export function App() {
               onChange={(value) => setForm({ ...form, slippageRate: value })}
             />
             <div className="rounded-md border border-border p-3">
-              <div className="mb-3 text-sm font-medium">EMA Trend Strategy</div>
+              <div className="mb-3 text-sm font-medium">Trend Strategy</div>
+              <div className="mb-3">
+                <Field label="Trend Indicator">
+                  <select
+                    className="input"
+                    value={form.strategy.trendMaType ?? "EMA"}
+                    onChange={(event) => setForm({ ...form, strategy: { ...form.strategy, trendMaType: event.target.value as "MA" | "EMA" } })}
+                  >
+                    <option value="MA">MA</option>
+                    <option value="EMA">EMA</option>
+                  </select>
+                </Field>
+              </div>
               <div className="mb-3">
                 <Field label="Direction">
                   <select
@@ -292,7 +314,7 @@ export function App() {
                       })
                     }
                   >
-                    <option value="EMA">EMA reverse signal</option>
+                    <option value="EMA">{form.strategy.trendMaType ?? "EMA"} reverse signal</option>
                     <option value="NONE">None</option>
                   </select>
                 </Field>
@@ -300,7 +322,7 @@ export function App() {
               <div className="grid grid-cols-2 gap-3">
                 <NumberField
                   compact
-                  label="Trend EMA"
+                  label={`${form.strategy.trendMaType ?? "EMA"} Period`}
                   value={form.strategy.trendEmaPeriod}
                   onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, trendEmaPeriod: value } })}
                 />
@@ -625,7 +647,7 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
   return (
     <ChartPanel title="K-Line Strategy View" icon={<BarChart3 size={18} />}>
       <div className="mb-3 flex flex-wrap gap-4 text-xs text-muted">
-        <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#9333ea]" /> Trend EMA</span>
+        <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#9333ea]" /> {result.config.strategy.trendMaType ?? "EMA"} {result.config.strategy.trendEmaPeriod}</span>
         <span className="inline-flex items-center gap-1"><span className="h-2 w-4 bg-[#98a2b3]" /> Volume</span>
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-positive" /> Buy</span>
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-negative" /> Short</span>

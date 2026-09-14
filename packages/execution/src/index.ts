@@ -23,16 +23,18 @@ export class SimulatedExecutionEngine implements ExecutionEngine {
 
   execute(input: ExecutionInput): void {
     const { candle, portfolio } = input;
-    const position = portfolio.getOpenPosition();
+    let position = portfolio.getOpenPosition();
 
     if (position?.side === "LONG" && position.stopPrice !== undefined && candle.low <= position.stopPrice) {
-      this.closePosition(candle, portfolio, position.stopPrice, "STOP_LOSS");
-      return;
+      const gapped = candle.open <= position.stopPrice;
+      this.closePosition(candle, portfolio, Math.min(candle.open, position.stopPrice), "STOP_LOSS", gapped ? candle.openTime : candle.closeTime);
+      position = portfolio.getOpenPosition();
     }
 
     if (position?.side === "SHORT" && position.stopPrice !== undefined && candle.high >= position.stopPrice) {
-      this.closePosition(candle, portfolio, position.stopPrice, "STOP_LOSS");
-      return;
+      const gapped = candle.open >= position.stopPrice;
+      this.closePosition(candle, portfolio, Math.max(candle.open, position.stopPrice), "STOP_LOSS", gapped ? candle.openTime : candle.closeTime);
+      position = portfolio.getOpenPosition();
     }
 
     if (input.signal.type === "BUY") {
@@ -113,7 +115,7 @@ export class SimulatedExecutionEngine implements ExecutionEngine {
     });
   }
 
-  private closePosition(candle: Candle, portfolio: Portfolio, referencePrice: number, reason: TradeExitReason): void {
+  private closePosition(candle: Candle, portfolio: Portfolio, referencePrice: number, reason: TradeExitReason, time = candle.closeTime): void {
     const position = portfolio.getOpenPosition();
     if (!position) {
       return;
@@ -127,7 +129,7 @@ export class SimulatedExecutionEngine implements ExecutionEngine {
     portfolio.onFill({
       type: position.side === "SHORT" ? "CLOSE_SHORT" : "CLOSE_LONG",
       symbol: candle.symbol,
-      time: candle.closeTime,
+      time,
       price: executionPrice,
       quantity: position.quantity,
       fee,

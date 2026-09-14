@@ -79,7 +79,7 @@ export class BacktestEngine {
 
 function createChartPoints(candles: Candle[], config: BacktestConfig) {
   const closes = candles.map((candle) => candle.close);
-  const trendEma = ema(closes, config.strategy.trendEmaPeriod);
+  const trendEma = (config.strategy.trendMaType === "MA" ? sma : ema)(closes, config.strategy.trendEmaPeriod);
   const atrSeries = atr(candles, config.strategy.atrPeriod);
   const adxSeries = adx(candles, config.strategy.adxPeriod);
   const volumeMa = sma(candles.map((candle) => candle.volume), config.strategy.volumeMaPeriod);
