@@ -62,7 +62,7 @@ export type SymbolCode = (typeof supportedSymbols)[number];
 export type Timeframe = (typeof supportedTimeframes)[number];
 
 export type Candle = {
-  symbol: SymbolCode;
+  symbol: string;
   timeframe: Timeframe;
   openTime: number;
   closeTime: number;
@@ -86,7 +86,7 @@ export type TradeExitReason = "SIGNAL" | "STOP_LOSS" | "END_OF_BACKTEST";
 
 export type Trade = {
   id: string;
-  symbol: SymbolCode;
+  symbol: string;
   side: PositionSide;
   entryTime: number;
   exitTime?: number;
@@ -100,7 +100,7 @@ export type Trade = {
 };
 
 export type Position = {
-  symbol: SymbolCode;
+  symbol: string;
   side: PositionSide;
   quantity: number;
   entryPrice: number;
@@ -166,6 +166,51 @@ export type EmaTrendStrategyConfig = {
 };
 
 export type StrategyConfig = EmaTrendStrategyConfig;
+
+export const defaultWyckoffStrategyConfig = {
+  type: "WYCKOFF_SOS_LPS",
+  sosLpsEnabled: true,
+  springEnabled: true,
+  utadEnabled: true,
+  rangeBars: 20,
+  maxRangeWidthPct: 0.18,
+  sosBreakoutPct: 0.01,
+  sosVolumeMultiplier: 1.5,
+  sosCloseLocationMin: 0.7,
+  lpsMinBars: 3,
+  lpsMaxBars: 15,
+  lpsTolerancePct: 0.03,
+  lpsMaxVolumeRatio: 0.85,
+  springPenetrationPct: 0.01,
+  utadPenetrationPct: 0.01,
+  trapReentryMaxBars: 3,
+  invalidationPct: 0.04
+} as const;
+
+export const wyckoffStrategyConfigSchema = z.object({
+  type: z.literal("WYCKOFF_SOS_LPS"),
+  sosLpsEnabled: z.boolean().default(defaultWyckoffStrategyConfig.sosLpsEnabled),
+  springEnabled: z.boolean().default(defaultWyckoffStrategyConfig.springEnabled),
+  utadEnabled: z.boolean().default(defaultWyckoffStrategyConfig.utadEnabled),
+  rangeBars: z.number().int().min(5).max(200),
+  maxRangeWidthPct: z.number().positive().max(1),
+  sosBreakoutPct: z.number().min(0).max(1),
+  sosVolumeMultiplier: z.number().positive(),
+  sosCloseLocationMin: z.number().min(0).max(1),
+  lpsMinBars: z.number().int().min(1),
+  lpsMaxBars: z.number().int().min(1),
+  lpsTolerancePct: z.number().min(0).max(1),
+  lpsMaxVolumeRatio: z.number().positive(),
+  springPenetrationPct: z.number().positive().max(1).default(defaultWyckoffStrategyConfig.springPenetrationPct),
+  utadPenetrationPct: z.number().positive().max(1).default(defaultWyckoffStrategyConfig.utadPenetrationPct),
+  trapReentryMaxBars: z.number().int().min(1).max(30).default(defaultWyckoffStrategyConfig.trapReentryMaxBars),
+  invalidationPct: z.number().positive().max(1)
+}).refine((value) => value.lpsMinBars <= value.lpsMaxBars, {
+  message: "lpsMinBars must be at most lpsMaxBars",
+  path: ["lpsMinBars"]
+});
+
+export type WyckoffStrategyConfig = z.infer<typeof wyckoffStrategyConfigSchema>;
 
 export type BacktestConfig = {
   symbol: SymbolCode;

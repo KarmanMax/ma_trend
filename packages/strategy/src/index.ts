@@ -1,5 +1,9 @@
 import { adx, atr, ema, sma } from "@trend-trade/indicator";
 import type { Candle, EmaTrendStrategyConfig, Signal, StrategyConfig } from "@trend-trade/shared";
+import type { IncrementalStrategySession } from "./incremental";
+
+export * from "./incremental";
+export * from "./wyckoff";
 
 export type StrategyContext<TConfig extends StrategyConfig = StrategyConfig> = {
   candles: Candle[];
@@ -13,18 +17,20 @@ export interface Strategy<TConfig extends StrategyConfig = StrategyConfig> {
   generateSignal(context: StrategyContext<TConfig>): Signal;
 }
 
+export type StrategyImplementation = Strategy | IncrementalStrategySession;
+
 export interface StrategyFactory {
-  create(config: StrategyConfig): Strategy;
+  create(config: StrategyConfig): StrategyImplementation;
 }
 
 export class StrategyRegistry implements StrategyFactory {
-  private readonly factories = new Map<StrategyConfig["type"], (config: StrategyConfig) => Strategy>();
+  private readonly factories = new Map<StrategyConfig["type"], (config: StrategyConfig) => StrategyImplementation>();
 
-  register<T extends StrategyConfig["type"]>(type: T, factory: (config: Extract<StrategyConfig, { type: T }>) => Strategy): void {
-    this.factories.set(type, factory as (config: StrategyConfig) => Strategy);
+  register<T extends StrategyConfig["type"]>(type: T, factory: (config: Extract<StrategyConfig, { type: T }>) => StrategyImplementation): void {
+    this.factories.set(type, factory as (config: StrategyConfig) => StrategyImplementation);
   }
 
-  create(config: StrategyConfig): Strategy {
+  create(config: StrategyConfig): StrategyImplementation {
     const factory = this.factories.get(config.type);
     if (!factory) {
       throw new Error(`Strategy is not registered: ${config.type}`);

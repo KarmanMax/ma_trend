@@ -200,9 +200,12 @@ export function App() {
             <h1 className="text-xl font-semibold tracking-normal">Trend Trade</h1>
             <p className="text-sm text-muted">Multi-asset trend backtesting workstation</p>
           </div>
-          <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted">
-            <Activity size={16} />
-            MVP Backtest Engine
+          <div className="flex items-center gap-4">
+            <a className="text-sm font-medium text-accent hover:underline" href="/wyckoff/">Wyckoff workspace</a>
+            <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted">
+              <Activity size={16} />
+              MVP Backtest Engine
+            </div>
           </div>
         </div>
       </header>

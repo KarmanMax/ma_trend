@@ -117,3 +117,31 @@ model DrawdownPoint {
 
   @@index([backtestRunId, time])
 }
+
+model WyckoffBacktestRun {
+  id         String   @id
+  resultJson String
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model WyckoffScanJob {
+  id           String   @id
+  status       String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  completed    Int
+  total        Int
+  strategyJson String
+  resultsJson  String
+  error        String?
+
+  @@index([createdAt])
+}
+
+model WyckoffCheckpoint {
+  key          String   @id
+  snapshotJson String
+  updatedAt    DateTime @updatedAt
+}

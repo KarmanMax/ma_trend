@@ -2,8 +2,10 @@ import { SimulatedExecutionEngine, type ExecutionEngine } from "@trend-trade/exe
 import { adx, atr, calculateDrawdownCurve, calculateMetrics, ema, sma } from "@trend-trade/indicator";
 import type { MarketDataProvider } from "@trend-trade/market-data";
 import { SimulatedPortfolio, type Portfolio } from "@trend-trade/portfolio";
-import type { BacktestConfig, BacktestResult, Candle } from "@trend-trade/shared";
-import { createDefaultStrategyRegistry, type StrategyFactory } from "@trend-trade/strategy";
+import type { BacktestChartPoint, BacktestConfig, BacktestResult, Candle, EmaTrendStrategyConfig, Signal } from "@trend-trade/shared";
+import { createDefaultStrategyRegistry, createStrategyConfigKey, IncrementalStrategyRunner, type StrategyFactory } from "@trend-trade/strategy";
+
+export * from "./incremental";
 
 export type PortfolioFactory = (initialCapital: number) => Portfolio;
 export type ExecutionEngineFactory = (config: BacktestConfig) => ExecutionEngine;
@@ -37,19 +39,42 @@ export class BacktestEngine {
     const portfolio = this.portfolioFactory(config.initialCapital);
     const executionEngine = this.executionEngineFactory(config);
     const strategy = this.strategyFactoryProvider(candles).create(config.strategy);
+    const runner = "onClosedBar" in strategy
+      ? new IncrementalStrategyRunner(strategy, {
+          strategyType: config.strategy.type,
+          configKey: createStrategyConfigKey(config.strategy),
+          symbol: config.symbol,
+          timeframe: config.timeframe
+        })
+      : null;
+    const replayCandles = runner
+      ? candles.filter((candle) => candle.closeTime <= Date.parse(config.endTime)).sort((left, right) => left.closeTime - right.closeTime)
+      : candles;
+    if (replayCandles.length === 0) {
+      throw new Error("No closed candles returned for the requested range");
+    }
+    const processedCandles: Candle[] = [];
 
-    for (let index = 0; index < candles.length; index += 1) {
-      const candle = candles[index];
-      const signal = strategy.generateSignal({
-        candles,
-        index,
-        config: config.strategy
-      });
+    for (let index = 0; index < replayCandles.length; index += 1) {
+      const candle = replayCandles[index];
+      let signal: Signal;
+      if (runner) {
+        const step = runner.onClosedBar(candle);
+        if (!step) {
+          continue;
+        }
+        signal = step.signal;
+      } else if ("generateSignal" in strategy) {
+        signal = strategy.generateSignal({ candles, index, config: config.strategy });
+      } else {
+        throw new Error("Strategy does not support historical or incremental execution");
+      }
       executionEngine.execute({ candle, signal, portfolio });
       portfolio.markToMarket(candle);
+      processedCandles.push(candle);
     }
 
-    const lastCandle = candles[candles.length - 1];
+    const lastCandle = processedCandles[processedCandles.length - 1];
     executionEngine.closeAtEnd(lastCandle, portfolio);
     portfolio.markToMarket(lastCandle);
 
@@ -63,7 +88,7 @@ export class BacktestEngine {
       trades,
       timeframe: config.timeframe
     });
-    const chartPoints = createChartPoints(candles, config);
+    const chartPoints = runner ? createBaseChartPoints(processedCandles) : createTrendChartPoints(processedCandles, config.strategy);
 
     return {
       config,
@@ -77,20 +102,27 @@ export class BacktestEngine {
   }
 }
 
-function createChartPoints(candles: Candle[], config: BacktestConfig) {
-  const closes = candles.map((candle) => candle.close);
-  const trendEma = (config.strategy.trendMaType === "MA" ? sma : ema)(closes, config.strategy.trendEmaPeriod);
-  const atrSeries = atr(candles, config.strategy.atrPeriod);
-  const adxSeries = adx(candles, config.strategy.adxPeriod);
-  const volumeMa = sma(candles.map((candle) => candle.volume), config.strategy.volumeMaPeriod);
-
-  return candles.map((candle, index) => ({
+function createBaseChartPoints(candles: Candle[]): BacktestChartPoint[] {
+  return candles.map((candle) => ({
     time: candle.closeTime,
     open: candle.open,
     high: candle.high,
     low: candle.low,
     close: candle.close,
-    volume: candle.volume,
+    volume: candle.volume
+  }));
+}
+
+function createTrendChartPoints(candles: Candle[], config: EmaTrendStrategyConfig): BacktestChartPoint[] {
+  const basePoints = createBaseChartPoints(candles);
+  const closes = candles.map((candle) => candle.close);
+  const trendEma = (config.trendMaType === "MA" ? sma : ema)(closes, config.trendEmaPeriod);
+  const atrSeries = atr(candles, config.atrPeriod);
+  const adxSeries = adx(candles, config.adxPeriod);
+  const volumeMa = sma(candles.map((candle) => candle.volume), config.volumeMaPeriod);
+
+  return candles.map((_, index) => ({
+    ...basePoints[index],
     trendEma: trendEma[index] ?? undefined,
     atr: atrSeries[index] ?? undefined,
     adx: adxSeries[index] ?? undefined,

@@ -1,9 +1,9 @@
-import type { Candle, EquityPoint, Position, SymbolCode, Trade, TradeExitReason } from "@trend-trade/shared";
+import type { Candle, EquityPoint, Position, Trade, TradeExitReason } from "@trend-trade/shared";
 
 export type Fill =
   | {
       type: "OPEN_LONG" | "OPEN_SHORT";
-      symbol: SymbolCode;
+      symbol: string;
       time: number;
       price: number;
       quantity: number;
@@ -12,7 +12,7 @@ export type Fill =
     }
   | {
       type: "CLOSE_LONG" | "CLOSE_SHORT";
-      symbol: SymbolCode;
+      symbol: string;
       time: number;
       price: number;
       quantity: number;

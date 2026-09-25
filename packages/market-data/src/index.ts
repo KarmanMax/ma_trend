@@ -1,6 +1,8 @@
 import type { Candle, SymbolCode, Timeframe } from "@trend-trade/shared";
 import { fetch, ProxyAgent } from "undici";
 
+export * from "./crypto";
+
 export type GetCandlesRequest = {
   symbol: SymbolCode;
   timeframe: Timeframe;
