@@ -144,6 +144,9 @@ export type BacktestChartPoint = {
   atr?: number;
   adx?: number;
   volumeMa?: number;
+  macdLine?: number;
+  macdSignal?: number;
+  macdHistogram?: number;
 };
 
 export type EmaTrendStrategyConfig = {
@@ -165,7 +168,17 @@ export type EmaTrendStrategyConfig = {
   exitTrigger: StrategyExitTrigger;
 };
 
-export type StrategyConfig = EmaTrendStrategyConfig;
+export type MacdTrendStrategyConfig = Omit<EmaTrendStrategyConfig, "type" | "trendEmaPeriod" | "trendMaType" | "emaFast" | "emaSlow" | "exitTrigger"> & {
+  type: "MACD_TREND";
+  macdFastPeriod: number;
+  macdSlowPeriod: number;
+  macdSignalPeriod: number;
+  zeroFilterEnabled: boolean;
+  zeroProximityPct: number;
+  exitTrigger: "MACD" | "NONE";
+};
+
+export type StrategyConfig = EmaTrendStrategyConfig | MacdTrendStrategyConfig;
 
 export const defaultWyckoffStrategyConfig = {
   type: "WYCKOFF_SOS_LPS",
@@ -234,6 +247,51 @@ export type BacktestResult = {
   trades: Trade[];
 };
 
+const emaTrendStrategyConfigSchema = z.object({
+  type: z.literal("EMA_TREND"),
+  trendEmaPeriod: z.number().int().positive().optional(),
+  trendMaType: z.enum(["MA", "EMA"]).default("MA"),
+  emaFast: z.number().int().positive().optional(),
+  emaSlow: z.number().int().positive().optional(),
+  atrPeriod: z.number().int().positive(),
+  atrMultiplier: z.number().positive(),
+  atrStopEnabled: z.boolean().default(false),
+  adxPeriod: z.number().int().positive(),
+  adxThreshold: z.number().min(0).max(100),
+  adxFilterEnabled: z.boolean().default(false),
+  volumeMaPeriod: z.number().int().positive(),
+  volumeMultiplier: z.number().positive(),
+  volumeFilterEnabled: z.boolean().default(false),
+  direction: z.enum(["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT"]),
+  exitTrigger: z.enum(["EMA", "NONE"]).default("EMA")
+}).transform((value) => ({
+  ...value,
+  trendEmaPeriod: value.trendEmaPeriod ?? value.emaSlow ?? 200
+}));
+
+const macdTrendStrategyConfigSchema = z.object({
+  type: z.literal("MACD_TREND"),
+  macdFastPeriod: z.number().int().positive().default(12),
+  macdSlowPeriod: z.number().int().positive().default(26),
+  macdSignalPeriod: z.number().int().positive().default(9),
+  zeroFilterEnabled: z.boolean().default(false),
+  zeroProximityPct: z.number().min(0).max(100).default(0.5),
+  atrPeriod: z.number().int().positive(),
+  atrMultiplier: z.number().positive(),
+  atrStopEnabled: z.boolean().default(false),
+  adxPeriod: z.number().int().positive(),
+  adxThreshold: z.number().min(0).max(100),
+  adxFilterEnabled: z.boolean().default(false),
+  volumeMaPeriod: z.number().int().positive(),
+  volumeMultiplier: z.number().positive(),
+  volumeFilterEnabled: z.boolean().default(false),
+  direction: z.enum(["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT"]),
+  exitTrigger: z.enum(["MACD", "NONE"]).default("MACD")
+}).refine((value) => value.macdFastPeriod < value.macdSlowPeriod, {
+  message: "macdFastPeriod must be less than macdSlowPeriod",
+  path: ["macdFastPeriod"]
+});
+
 export const backtestConfigSchema = z.object({
   symbol: z.enum(supportedSymbols),
   timeframe: z.enum(supportedTimeframes),
@@ -242,27 +300,7 @@ export const backtestConfigSchema = z.object({
   initialCapital: z.number().positive(),
   feeRate: z.number().min(0).max(0.1),
   slippageRate: z.number().min(0).max(0.1),
-  strategy: z.object({
-    type: z.literal("EMA_TREND"),
-    trendEmaPeriod: z.number().int().positive().optional(),
-    trendMaType: z.enum(["MA", "EMA"]).default("MA"),
-    emaFast: z.number().int().positive().optional(),
-    emaSlow: z.number().int().positive().optional(),
-    atrPeriod: z.number().int().positive(),
-    atrMultiplier: z.number().positive(),
-    atrStopEnabled: z.boolean().default(false),
-    adxPeriod: z.number().int().positive(),
-    adxThreshold: z.number().min(0).max(100),
-    adxFilterEnabled: z.boolean().default(true),
-    volumeMaPeriod: z.number().int().positive(),
-    volumeMultiplier: z.number().positive(),
-    volumeFilterEnabled: z.boolean().default(true),
-    direction: z.enum(["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT"]),
-    exitTrigger: z.enum(["EMA", "NONE"]).default("EMA")
-  }).transform((value) => ({
-    ...value,
-    trendEmaPeriod: value.trendEmaPeriod ?? value.emaSlow ?? 200
-  }))
+  strategy: z.union([emaTrendStrategyConfigSchema, macdTrendStrategyConfigSchema])
 }).refine((value) => Date.parse(value.startTime) < Date.parse(value.endTime), {
   message: "startTime must be before endTime",
   path: ["startTime"]

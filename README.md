@@ -45,7 +45,9 @@ prisma/
 
 ## MVP Strategy
 
-Trend indicator: `MA` (simple moving average) or `EMA` (default), with a configurable period (default 200). Signals use closing-price crossings of the selected average, including reverse exits and position flips. Legacy configs default to EMA. For storage compatibility, `trendEmaPeriod`, `trendEma`, and the `EMA` exit-trigger value retain their names; `trendMaType` determines the actual average used.
+Trend indicators: `MA` (simple moving average), `EMA`, or a separate `MACD_TREND` strategy. MA/EMA signals use closing-price crossings of the selected average, including reverse exits and position flips. Legacy configs default to EMA. For storage compatibility, `trendEmaPeriod`, `trendEma`, and the `EMA` exit-trigger value retain their names; `trendMaType` determines the actual average used.
+
+The MACD strategy uses the MACD line (fast EMA minus slow EMA) crossing its signal EMA on completed bars. Defaults are 12/26/9. A golden cross opens long and a death cross opens short; direction settings can restrict entries. With `exitTrigger = MACD`, the opposite cross closes or flips the current position. Optional `zeroFilterEnabled` applies only to entries: `abs(MACD line) / close * 100` must be at most `zeroProximityPct` (default 0.5%). Reverse exits still fire when the filter blocks a new entry. ATR stops, ADX, and volume filters work as they do for the MA/EMA strategy. The MACD line, signal, and histogram are saved with each chart point and shown below the price chart.
 
 Symbol:
 

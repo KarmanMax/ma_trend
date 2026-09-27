@@ -41,6 +41,9 @@ export type ApiBacktestDetail = {
     atr?: number | null;
     adx?: number | null;
     volumeMa?: number | null;
+    macdLine?: number | null;
+    macdSignal?: number | null;
+    macdHistogram?: number | null;
   }>;
   trades: Array<{
     id: string;

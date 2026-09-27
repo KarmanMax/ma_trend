@@ -1,5 +1,5 @@
-import { adx, atr, ema, sma } from "@trend-trade/indicator";
-import type { Candle, EmaTrendStrategyConfig, Signal, StrategyConfig } from "@trend-trade/shared";
+import { adx, atr, ema, macd, sma } from "@trend-trade/indicator";
+import type { Candle, EmaTrendStrategyConfig, MacdTrendStrategyConfig, Signal, StrategyConfig } from "@trend-trade/shared";
 import type { IncrementalStrategySession } from "./incremental";
 
 export * from "./incremental";
@@ -17,7 +17,7 @@ export interface Strategy<TConfig extends StrategyConfig = StrategyConfig> {
   generateSignal(context: StrategyContext<TConfig>): Signal;
 }
 
-export type StrategyImplementation = Strategy | IncrementalStrategySession;
+export type StrategyImplementation = Strategy<StrategyConfig> | IncrementalStrategySession;
 
 export interface StrategyFactory {
   create(config: StrategyConfig): StrategyImplementation;
@@ -137,34 +137,104 @@ export class EmaTrendStrategy implements Strategy<EmaTrendStrategyConfig> {
     currentVolumeMa: number | null,
     candle: Candle
   ): string | null {
-    if (this.config.atrStopEnabled && currentAtr === null) {
-      return "Waiting for ATR warmup";
+    return entryFilterFailure(this.config, currentAtr, currentAdx, currentVolumeMa, candle);
+  }
+}
+
+function entryFilterFailure(
+  config: EmaTrendStrategyConfig | MacdTrendStrategyConfig,
+  currentAtr: number | null,
+  currentAdx: number | null,
+  currentVolumeMa: number | null,
+  candle: Candle
+): string | null {
+  if (config.atrStopEnabled && currentAtr === null) {
+    return "Waiting for ATR warmup";
+  }
+
+  if (config.adxFilterEnabled) {
+    if (currentAdx === null) {
+      return "Waiting for ADX warmup";
+    }
+    if (currentAdx < config.adxThreshold) {
+      return `ADX ${currentAdx.toFixed(2)} below ${config.adxThreshold}`;
+    }
+  }
+
+  if (config.volumeFilterEnabled) {
+    if (currentVolumeMa === null) {
+      return "Waiting for volume MA warmup";
+    }
+    if (candle.volume < currentVolumeMa * config.volumeMultiplier) {
+      return "Volume below filter threshold";
+    }
+  }
+
+  return null;
+}
+
+export class MacdTrendStrategy implements Strategy<MacdTrendStrategyConfig> {
+  readonly id = "MACD_TREND";
+  readonly name = "MACD Trend Following";
+  private readonly macdSeries: ReturnType<typeof macd>;
+  private readonly atrSeries: Array<number | null>;
+  private readonly adxSeries: Array<number | null>;
+  private readonly volumeMaSeries: Array<number | null>;
+
+  constructor(private readonly candles: Candle[], private readonly config: MacdTrendStrategyConfig) {
+    this.macdSeries = macd(candles.map((candle) => candle.close), config.macdFastPeriod, config.macdSlowPeriod, config.macdSignalPeriod);
+    this.atrSeries = atr(candles, config.atrPeriod);
+    this.adxSeries = adx(candles, config.adxPeriod);
+    this.volumeMaSeries = sma(candles.map((candle) => candle.volume), config.volumeMaPeriod);
+  }
+
+  generateSignal({ index }: StrategyContext<MacdTrendStrategyConfig>): Signal {
+    const previousLine = this.macdSeries.line[index - 1];
+    const previousSignal = this.macdSeries.signal[index - 1];
+    const currentLine = this.macdSeries.line[index];
+    const currentSignal = this.macdSeries.signal[index];
+    if (previousLine == null || previousSignal == null || currentLine == null || currentSignal == null) {
+      return { type: "HOLD", reason: "Waiting for MACD warmup" };
     }
 
-    if (this.config.adxFilterEnabled) {
-      if (currentAdx === null) {
-        return "Waiting for ADX warmup";
-      }
-      if (currentAdx < this.config.adxThreshold) {
-        return `ADX ${currentAdx.toFixed(2)} below ${this.config.adxThreshold}`;
-      }
+    const crossedUp = previousLine <= previousSignal && currentLine > currentSignal;
+    const crossedDown = previousLine >= previousSignal && currentLine < currentSignal;
+    if (!crossedUp && !crossedDown) {
+      return { type: "HOLD", reason: "No MACD cross" };
     }
 
-    if (this.config.volumeFilterEnabled) {
-      if (currentVolumeMa === null) {
-        return "Waiting for volume MA warmup";
-      }
-      if (candle.volume < currentVolumeMa * this.config.volumeMultiplier) {
-        return "Volume below filter threshold";
-      }
+    const exitEnabled = this.config.exitTrigger === "MACD";
+    const reason = crossedUp ? "MACD golden cross" : "MACD death cross";
+    const closeType = crossedUp ? "CLOSE_SHORT" : "CLOSE_LONG";
+    const directionExcluded = crossedUp ? this.config.direction === "SHORT_ONLY" : this.config.direction === "LONG_ONLY";
+    if (directionExcluded) {
+      return exitEnabled ? { type: closeType, reason } : { type: "HOLD", reason: "MACD exit trigger disabled" };
     }
 
-    return null;
+    const candle = this.candles[index];
+    const nearZero = Math.abs(currentLine) / candle.close * 100 <= this.config.zeroProximityPct;
+    const filterFailure = this.config.zeroFilterEnabled && !nearZero
+      ? `MACD line is farther than ${this.config.zeroProximityPct}% of price from zero`
+      : entryFilterFailure(this.config, this.atrSeries[index], this.adxSeries[index], this.volumeMaSeries[index], candle);
+    if (filterFailure) {
+      return exitEnabled ? { type: closeType, reason: `${reason}; ${filterFailure}` } : { type: "HOLD", reason: filterFailure };
+    }
+
+    const currentAtr = this.atrSeries[index];
+    return {
+      type: crossedUp ? "BUY" : "SELL_SHORT",
+      reason,
+      stopPrice: this.config.atrStopEnabled && currentAtr !== null
+        ? candle.close + (crossedUp ? -1 : 1) * currentAtr * this.config.atrMultiplier
+        : undefined,
+      allowPositionFlip: exitEnabled
+    };
   }
 }
 
 export function createDefaultStrategyRegistry(candles: Candle[]): StrategyRegistry {
   const registry = new StrategyRegistry();
   registry.register("EMA_TREND", (config) => new EmaTrendStrategy(candles, config));
+  registry.register("MACD_TREND", (config) => new MacdTrendStrategy(candles, config));
   return registry;
 }

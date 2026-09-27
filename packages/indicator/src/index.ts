@@ -22,6 +22,26 @@ export function ema(values: number[], period: number): Array<number | null> {
   return output;
 }
 
+export function macd(values: number[], fastPeriod: number, slowPeriod: number, signalPeriod: number): {
+  line: Array<number | null>;
+  signal: Array<number | null>;
+  histogram: Array<number | null>;
+} {
+  if (!Number.isInteger(fastPeriod) || !Number.isInteger(slowPeriod) || !Number.isInteger(signalPeriod) ||
+      fastPeriod <= 0 || fastPeriod >= slowPeriod || signalPeriod <= 0) {
+    throw new Error("MACD requires positive integer periods and fastPeriod < slowPeriod");
+  }
+
+  const fast = ema(values, fastPeriod);
+  const slow = ema(values, slowPeriod);
+  const line = values.map((_, index) => fast[index] === null || slow[index] === null ? null : fast[index]! - slow[index]!);
+  const firstReady = slowPeriod - 1;
+  const signalValues = ema(line.slice(firstReady).map((value) => value!), signalPeriod);
+  const signal = values.map((_, index) => index < firstReady ? null : signalValues[index - firstReady]);
+  const histogram = values.map((_, index) => line[index] === null || signal[index] === null ? null : line[index]! - signal[index]!);
+  return { line, signal, histogram };
+}
+
 export function atr(candles: Candle[], period: number): Array<number | null> {
   if (period <= 0) {
     throw new Error("ATR period must be positive");

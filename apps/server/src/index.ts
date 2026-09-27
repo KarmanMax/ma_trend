@@ -129,7 +129,10 @@ app.get("/api/backtests/:id", async (request, response, next) => {
         trendEma: point.trendEma,
         atr: point.atr,
         adx: point.adx,
-        volumeMa: point.volumeMa
+        volumeMa: point.volumeMa,
+        macdLine: point.macdLine,
+        macdSignal: point.macdSignal,
+        macdHistogram: point.macdHistogram
       })),
       drawdownCurve: run.drawdownPoints.map((point) => ({
         time: point.time.toISOString(),
@@ -209,7 +212,10 @@ async function saveBacktestResult(config: BacktestConfig, result: BacktestResult
           trendEma: point.trendEma,
           atr: point.atr,
           adx: point.adx,
-          volumeMa: point.volumeMa
+          volumeMa: point.volumeMa,
+          macdLine: point.macdLine,
+          macdSignal: point.macdSignal,
+          macdHistogram: point.macdHistogram
         }))
       },
       equityPoints: {

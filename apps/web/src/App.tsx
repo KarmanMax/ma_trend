@@ -1,4 +1,4 @@
-import { supportedSymbols, supportedTimeframes, type BacktestConfig, type SymbolCode, type Timeframe } from "@trend-trade/shared";
+import { supportedSymbols, supportedTimeframes, type BacktestConfig, type EmaTrendStrategyConfig, type MacdTrendStrategyConfig, type StrategyConfig, type SymbolCode, type Timeframe } from "@trend-trade/shared";
 import {
   CandlestickSeries,
   ColorType,
@@ -14,16 +14,56 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
+  Bar,
   CartesianGrid,
+  ComposedChart,
   Line,
   LineChart,
   ResponsiveContainer,
+  ReferenceLine,
   Tooltip,
   XAxis,
   YAxis
 } from "recharts";
 import { createBacktest, getBacktest, listBacktests, type ApiBacktestDetail, type ApiBacktestRun } from "./lib/api";
 import { formatCurrency, formatDateTime, formatNumber, formatPercent } from "./lib/format";
+
+const defaultEmaStrategy: EmaTrendStrategyConfig = {
+    type: "EMA_TREND",
+    trendEmaPeriod: 200,
+    trendMaType: "MA",
+    atrPeriod: 14,
+    atrMultiplier: 2,
+    atrStopEnabled: false,
+    adxPeriod: 14,
+    adxThreshold: 20,
+    adxFilterEnabled: false,
+    volumeMaPeriod: 20,
+    volumeMultiplier: 1,
+    volumeFilterEnabled: false,
+    direction: "LONG_SHORT",
+    exitTrigger: "EMA"
+};
+
+const defaultMacdStrategy: MacdTrendStrategyConfig = {
+  type: "MACD_TREND",
+  macdFastPeriod: 12,
+  macdSlowPeriod: 26,
+  macdSignalPeriod: 9,
+  zeroFilterEnabled: false,
+  zeroProximityPct: 0.5,
+  atrPeriod: 14,
+  atrMultiplier: 2,
+  atrStopEnabled: false,
+  adxPeriod: 14,
+  adxThreshold: 20,
+  adxFilterEnabled: false,
+  volumeMaPeriod: 20,
+  volumeMultiplier: 1,
+  volumeFilterEnabled: false,
+  direction: "LONG_SHORT",
+  exitTrigger: "MACD"
+};
 
 const defaultConfig: BacktestConfig = {
   symbol: "ETH",
@@ -33,23 +73,27 @@ const defaultConfig: BacktestConfig = {
   initialCapital: 10000,
   feeRate: 0.001,
   slippageRate: 0.0005,
-  strategy: {
-    type: "EMA_TREND",
-    trendEmaPeriod: 200,
-    trendMaType: "MA",
-    atrPeriod: 14,
-    atrMultiplier: 2,
-    atrStopEnabled: false,
-    adxPeriod: 14,
-    adxThreshold: 20,
-    adxFilterEnabled: true,
-    volumeMaPeriod: 20,
-    volumeMultiplier: 1,
-    volumeFilterEnabled: true,
-    direction: "LONG_SHORT",
-    exitTrigger: "EMA"
-  }
+  strategy: defaultMacdStrategy
 };
+
+function switchTrendStrategy(current: StrategyConfig, indicator: string): StrategyConfig {
+  const common = {
+    atrPeriod: current.atrPeriod,
+    atrMultiplier: current.atrMultiplier,
+    atrStopEnabled: current.atrStopEnabled,
+    adxPeriod: current.adxPeriod,
+    adxThreshold: current.adxThreshold,
+    adxFilterEnabled: current.adxFilterEnabled,
+    volumeMaPeriod: current.volumeMaPeriod,
+    volumeMultiplier: current.volumeMultiplier,
+    volumeFilterEnabled: current.volumeFilterEnabled,
+    direction: current.direction
+  };
+  if (indicator === "MACD") {
+    return { ...defaultMacdStrategy, ...common };
+  }
+  return { ...defaultEmaStrategy, ...common, trendMaType: indicator as "MA" | "EMA" };
+}
 
 function defaultEndTime(): string {
   const end = new Date();
@@ -59,7 +103,7 @@ function defaultEndTime(): string {
 
 function defaultStartTime(): string {
   const start = new Date(defaultEndTime());
-  start.setUTCFullYear(start.getUTCFullYear() - 8);
+  start.setUTCFullYear(start.getUTCFullYear() - 1);
   return start.toISOString();
 }
 
@@ -273,11 +317,14 @@ export function App() {
                 <Field label="Trend Indicator">
                   <select
                     className="input"
-                    value={form.strategy.trendMaType ?? "EMA"}
-                    onChange={(event) => setForm({ ...form, strategy: { ...form.strategy, trendMaType: event.target.value as "MA" | "EMA" } })}
+                    value={form.strategy.type === "MACD_TREND" ? "MACD" : form.strategy.trendMaType ?? "EMA"}
+                    onChange={(event) => {
+                      setForm({ ...form, strategy: switchTrendStrategy(form.strategy, event.target.value) });
+                    }}
                   >
                     <option value="MA">MA</option>
                     <option value="EMA">EMA</option>
+                    <option value="MACD">MACD cross</option>
                   </select>
                 </Field>
               </div>
@@ -310,25 +357,41 @@ export function App() {
                     onChange={(event) =>
                       setForm({
                         ...form,
-                        strategy: {
-                          ...form.strategy,
-                          exitTrigger: event.target.value as typeof form.strategy.exitTrigger
-                        }
+                        strategy: form.strategy.type === "MACD_TREND"
+                          ? { ...form.strategy, exitTrigger: event.target.value as "MACD" | "NONE" }
+                          : { ...form.strategy, exitTrigger: event.target.value as "EMA" | "NONE" }
                       })
                     }
                   >
-                    <option value="EMA">{form.strategy.trendMaType ?? "EMA"} reverse signal</option>
+                    <option value={form.strategy.type === "MACD_TREND" ? "MACD" : "EMA"}>
+                      {form.strategy.type === "MACD_TREND" ? "MACD" : form.strategy.trendMaType ?? "EMA"} reverse signal
+                    </option>
                     <option value="NONE">None</option>
                   </select>
                 </Field>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <NumberField
+              <div className="grid gap-4">
+                <div className="grid grid-cols-2 gap-3 rounded-md border border-border/70 bg-slate-50/60 p-3">
+                {form.strategy.type === "MACD_TREND" ? <>
+                  <NumberField compact label="MACD Fast" value={form.strategy.macdFastPeriod}
+                    onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, macdFastPeriod: value } as MacdTrendStrategyConfig })} />
+                  <NumberField compact label="MACD Slow" value={form.strategy.macdSlowPeriod}
+                    onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, macdSlowPeriod: value } as MacdTrendStrategyConfig })} />
+                  <NumberField compact label="MACD Signal" value={form.strategy.macdSignalPeriod}
+                    onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, macdSignalPeriod: value } as MacdTrendStrategyConfig })} />
+                  <CheckboxField label="Near zero only" checked={form.strategy.zeroFilterEnabled}
+                    onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, zeroFilterEnabled: value } as MacdTrendStrategyConfig })} />
+                  {form.strategy.zeroFilterEnabled ? <NumberField compact label="Zero proximity (% of price)" step="0.1"
+                    value={form.strategy.zeroProximityPct}
+                    onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, zeroProximityPct: value } as MacdTrendStrategyConfig })} /> : null}
+                </> : <NumberField
                   compact
                   label={`${form.strategy.trendMaType ?? "EMA"} Period`}
                   value={form.strategy.trendEmaPeriod}
-                  onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, trendEmaPeriod: value } })}
-                />
+                  onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, trendEmaPeriod: value } as EmaTrendStrategyConfig })}
+                />}
+                </div>
+                <div className="grid grid-cols-2 gap-3 rounded-md border border-border/70 bg-slate-50/60 p-3">
                 <CheckboxField
                   label="ATR Stop"
                   checked={form.strategy.atrStopEnabled}
@@ -341,6 +404,8 @@ export function App() {
                   value={form.strategy.atrMultiplier}
                   onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, atrMultiplier: value } })}
                 />
+                </div>
+                <div className="grid grid-cols-2 gap-3 rounded-md border border-border/70 bg-slate-50/60 p-3">
                 <CheckboxField
                   label="ADX Filter"
                   checked={form.strategy.adxFilterEnabled}
@@ -348,6 +413,8 @@ export function App() {
                 />
                 <NumberField compact label="ADX Period" value={form.strategy.adxPeriod} onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, adxPeriod: value } })} />
                 <NumberField compact label="ADX Threshold" value={form.strategy.adxThreshold} onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, adxThreshold: value } })} />
+                </div>
+                <div className="grid grid-cols-2 gap-3 rounded-md border border-border/70 bg-slate-50/60 p-3">
                 <CheckboxField
                   label="Volume Filter"
                   checked={form.strategy.volumeFilterEnabled}
@@ -361,6 +428,7 @@ export function App() {
                   value={form.strategy.volumeMultiplier}
                   onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, volumeMultiplier: value } })}
                 />
+                </div>
               </div>
             </div>
             <button
@@ -379,6 +447,26 @@ export function App() {
           <MetricsPanel result={result} />
 
           <CandlestickChart result={result} />
+
+          {result?.config.strategy.type === "MACD_TREND" ? <ChartPanel title="MACD" icon={<BarChart3 size={18} />}>
+            <ResponsiveContainer width="100%" height={220}>
+              <ComposedChart data={result.chartPoints.map((point) => ({
+                time: new Date(point.time).toLocaleDateString(),
+                line: point.macdLine,
+                signal: point.macdSignal,
+                histogram: point.macdHistogram
+              }))}>
+                <CartesianGrid stroke="#e7ebf3" />
+                <XAxis dataKey="time" minTickGap={32} />
+                <YAxis width={70} />
+                <Tooltip formatter={(value) => Number(value).toFixed(4)} />
+                <ReferenceLine y={0} stroke="#98a2b3" />
+                <Bar dataKey="histogram" fill="#94a3b8" isAnimationActive={false} />
+                <Line type="monotone" dataKey="line" stroke="#2563eb" dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="signal" stroke="#f59e0b" dot={false} isAnimationActive={false} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </ChartPanel> : null}
 
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
             <ChartPanel title="Equity Curve" icon={<BarChart3 size={18} />}>
@@ -650,7 +738,7 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
   return (
     <ChartPanel title="K-Line Strategy View" icon={<BarChart3 size={18} />}>
       <div className="mb-3 flex flex-wrap gap-4 text-xs text-muted">
-        <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#9333ea]" /> {result.config.strategy.trendMaType ?? "EMA"} {result.config.strategy.trendEmaPeriod}</span>
+        {result.config.strategy.type === "EMA_TREND" ? <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#9333ea]" /> {result.config.strategy.trendMaType ?? "EMA"} {result.config.strategy.trendEmaPeriod}</span> : null}
         <span className="inline-flex items-center gap-1"><span className="h-2 w-4 bg-[#98a2b3]" /> Volume</span>
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-positive" /> Buy</span>
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-negative" /> Short</span>

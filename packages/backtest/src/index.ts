@@ -1,8 +1,8 @@
 import { SimulatedExecutionEngine, type ExecutionEngine } from "@trend-trade/execution";
-import { adx, atr, calculateDrawdownCurve, calculateMetrics, ema, sma } from "@trend-trade/indicator";
+import { adx, atr, calculateDrawdownCurve, calculateMetrics, ema, macd, sma } from "@trend-trade/indicator";
 import type { MarketDataProvider } from "@trend-trade/market-data";
 import { SimulatedPortfolio, type Portfolio } from "@trend-trade/portfolio";
-import type { BacktestChartPoint, BacktestConfig, BacktestResult, Candle, EmaTrendStrategyConfig, Signal } from "@trend-trade/shared";
+import type { BacktestChartPoint, BacktestConfig, BacktestResult, Candle, EmaTrendStrategyConfig, MacdTrendStrategyConfig, Signal } from "@trend-trade/shared";
 import { createDefaultStrategyRegistry, createStrategyConfigKey, IncrementalStrategyRunner, type StrategyFactory } from "@trend-trade/strategy";
 
 export * from "./incremental";
@@ -88,7 +88,9 @@ export class BacktestEngine {
       trades,
       timeframe: config.timeframe
     });
-    const chartPoints = runner ? createBaseChartPoints(processedCandles) : createTrendChartPoints(processedCandles, config.strategy);
+    const chartPoints = runner ? createBaseChartPoints(processedCandles)
+      : config.strategy.type === "MACD_TREND" ? createMacdChartPoints(processedCandles, config.strategy)
+      : createTrendChartPoints(processedCandles, config.strategy);
 
     return {
       config,
@@ -124,6 +126,24 @@ function createTrendChartPoints(candles: Candle[], config: EmaTrendStrategyConfi
   return candles.map((_, index) => ({
     ...basePoints[index],
     trendEma: trendEma[index] ?? undefined,
+    atr: atrSeries[index] ?? undefined,
+    adx: adxSeries[index] ?? undefined,
+    volumeMa: volumeMa[index] ?? undefined
+  }));
+}
+
+function createMacdChartPoints(candles: Candle[], config: MacdTrendStrategyConfig): BacktestChartPoint[] {
+  const basePoints = createBaseChartPoints(candles);
+  const series = macd(candles.map((candle) => candle.close), config.macdFastPeriod, config.macdSlowPeriod, config.macdSignalPeriod);
+  const atrSeries = atr(candles, config.atrPeriod);
+  const adxSeries = adx(candles, config.adxPeriod);
+  const volumeMa = sma(candles.map((candle) => candle.volume), config.volumeMaPeriod);
+
+  return candles.map((_, index) => ({
+    ...basePoints[index],
+    macdLine: series.line[index] ?? undefined,
+    macdSignal: series.signal[index] ?? undefined,
+    macdHistogram: series.histogram[index] ?? undefined,
     atr: atrSeries[index] ?? undefined,
     adx: adxSeries[index] ?? undefined,
     volumeMa: volumeMa[index] ?? undefined

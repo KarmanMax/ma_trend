@@ -94,6 +94,31 @@ describe("backtest strategy paths", () => {
     expect(result.chartPoints[3].trendEma).toBeCloseTo(40 / 3);
   });
 
+  it("executes MACD reversals and exposes MACD chart values", async () => {
+    const bars = [10, 10, 10, 10, 12, 10].map((close, index) => candle(index, close));
+    const macdConfig: BacktestConfig = {
+      ...config,
+      strategy: {
+        ...config.strategy,
+        type: "MACD_TREND",
+        macdFastPeriod: 2,
+        macdSlowPeriod: 3,
+        macdSignalPeriod: 2,
+        zeroFilterEnabled: false,
+        zeroProximityPct: 0.5,
+        exitTrigger: "MACD"
+      }
+    };
+    const result = await new BacktestEngine(provider(bars)).run(macdConfig);
+
+    expect(result.trades).toHaveLength(2);
+    expect(result.trades[0]).toMatchObject({ side: "LONG", entryTime: bars[4].closeTime, exitTime: bars[5].closeTime });
+    expect(result.trades[1]).toMatchObject({ side: "SHORT", entryTime: bars[5].closeTime });
+    expect(result.chartPoints[4].macdLine).toBeCloseTo(1 / 3);
+    expect(result.chartPoints[4].macdSignal).toBeCloseTo(2 / 9);
+    expect(result.chartPoints[4].trendEma).toBeUndefined();
+  });
+
   it("executes a Wyckoff entry and invalidation using the independent incremental backtest path", () => {
     const strategy = wyckoffStrategyConfigSchema.parse(defaultWyckoffStrategyConfig);
     const bar = (index: number, values: Partial<Candle> = {}): Candle => ({

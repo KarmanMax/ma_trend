@@ -101,6 +101,9 @@ model ChartPoint {
   atr           Float?
   adx           Float?
   volumeMa      Float?
+  macdLine      Float?
+  macdSignal    Float?
+  macdHistogram Float?
 
   backtestRun BacktestRun @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
 
