@@ -14,13 +14,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
-  Bar,
   CartesianGrid,
-  ComposedChart,
   Line,
   LineChart,
   ResponsiveContainer,
-  ReferenceLine,
   Tooltip,
   XAxis,
   YAxis
@@ -448,26 +445,6 @@ export function App() {
 
           <CandlestickChart result={result} />
 
-          {result?.config.strategy.type === "MACD_TREND" ? <ChartPanel title="MACD" icon={<BarChart3 size={18} />}>
-            <ResponsiveContainer width="100%" height={220}>
-              <ComposedChart data={result.chartPoints.map((point) => ({
-                time: new Date(point.time).toLocaleDateString(),
-                line: point.macdLine,
-                signal: point.macdSignal,
-                histogram: point.macdHistogram
-              }))}>
-                <CartesianGrid stroke="#e7ebf3" />
-                <XAxis dataKey="time" minTickGap={32} />
-                <YAxis width={70} />
-                <Tooltip formatter={(value) => Number(value).toFixed(4)} />
-                <ReferenceLine y={0} stroke="#98a2b3" />
-                <Bar dataKey="histogram" fill="#94a3b8" isAnimationActive={false} />
-                <Line type="monotone" dataKey="line" stroke="#2563eb" dot={false} isAnimationActive={false} />
-                <Line type="monotone" dataKey="signal" stroke="#f59e0b" dot={false} isAnimationActive={false} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </ChartPanel> : null}
-
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
             <ChartPanel title="Equity Curve" icon={<BarChart3 size={18} />}>
               <ResponsiveContainer width="100%" height={280}>
@@ -618,7 +595,6 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
         borderColor: "#d9dfeb",
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 8,
         barSpacing: 8
       },
       handleScroll: {
@@ -662,6 +638,34 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
       }
     });
 
+    let macdLineSeries: ReturnType<typeof chart.addSeries> | null = null;
+    let macdSignalSeries: ReturnType<typeof chart.addSeries> | null = null;
+    let macdHistogramSeries: ReturnType<typeof chart.addSeries> | null = null;
+    if (result.config.strategy.type === "MACD_TREND") {
+      macdLineSeries = chart.addSeries(LineSeries, {
+        color: "#2563eb",
+        lineWidth: 2,
+        priceScaleId: "macd",
+        priceLineVisible: false,
+        lastValueVisible: false
+      }, 1);
+      macdSignalSeries = chart.addSeries(LineSeries, {
+        color: "#f59e0b",
+        lineWidth: 2,
+        priceScaleId: "macd",
+        priceLineVisible: false,
+        lastValueVisible: false
+      }, 1);
+      macdHistogramSeries = chart.addSeries(HistogramSeries, {
+        color: "#98a2b3",
+        priceScaleId: "macd",
+        priceFormat: { type: "price", precision: 4, minMove: 0.0001 },
+        priceLineVisible: false,
+        lastValueVisible: false
+      }, 1);
+      chart.panes()[1]?.setHeight(150);
+    }
+
     const candles = result.chartPoints.map((point) => ({
       time: toChartTime(point.time),
       open: point.open,
@@ -681,6 +685,22 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
     candleSeries.setData(candles);
     trendEmaSeries.setData(trendEma);
     volumeSeries.setData(volumes);
+
+    if (macdLineSeries && macdSignalSeries && macdHistogramSeries) {
+      const macdPoints = result.chartPoints.filter((point) =>
+        typeof point.macdLine === "number" || typeof point.macdSignal === "number" || typeof point.macdHistogram === "number"
+      );
+      macdLineSeries.setData(macdPoints.filter((point) => typeof point.macdLine === "number").map((point) => ({
+        time: toChartTime(point.time), value: point.macdLine as number
+      })));
+      macdSignalSeries.setData(macdPoints.filter((point) => typeof point.macdSignal === "number").map((point) => ({
+        time: toChartTime(point.time), value: point.macdSignal as number
+      })));
+      macdHistogramSeries.setData(macdPoints.filter((point) => typeof point.macdHistogram === "number").map((point) => ({
+        time: toChartTime(point.time), value: point.macdHistogram as number,
+        color: (point.macdHistogram as number) >= 0 ? "rgba(4, 120, 87, 0.55)" : "rgba(180, 35, 24, 0.55)"
+      })));
+    }
 
     createSeriesMarkers(
       candleSeries,
@@ -710,7 +730,7 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
     );
 
     chart.timeScale().fitContent();
-    const range = candles.length > 180 ? { from: candles.length - 180, to: candles.length + 12 } : undefined;
+    const range = candles.length > 180 ? { from: candles.length - 180, to: candles.length - 1 } : undefined;
     if (range) {
       chart.timeScale().setVisibleLogicalRange(range);
     }
@@ -740,6 +760,10 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
       <div className="mb-3 flex flex-wrap gap-4 text-xs text-muted">
         {result.config.strategy.type === "EMA_TREND" ? <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#9333ea]" /> {result.config.strategy.trendMaType ?? "EMA"} {result.config.strategy.trendEmaPeriod}</span> : null}
         <span className="inline-flex items-center gap-1"><span className="h-2 w-4 bg-[#98a2b3]" /> Volume</span>
+        {result.config.strategy.type === "MACD_TREND" ? <>
+          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#2563eb]" /> MACD</span>
+          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#f59e0b]" /> Signal</span>
+        </> : null}
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-positive" /> Buy</span>
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-negative" /> Short</span>
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-muted" /> Exit</span>
