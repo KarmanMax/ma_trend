@@ -105,7 +105,7 @@ export function WyckoffApp() {
             <h1 className="text-xl font-semibold">Wyckoff SOS/LPS · Spring · UTAD</h1>
             <p className="text-sm text-muted">Configurable daily-bar heuristic</p>
           </div>
-          <a className="text-sm font-medium text-accent hover:underline" href="/">Trend backtest</a>
+          <div className="flex gap-4"><a className="text-sm font-medium text-accent hover:underline" href="/levels/">支撑/阻力扫描</a><a className="text-sm font-medium text-accent hover:underline" href="/">Trend backtest</a></div>
         </div>
       </header>
 

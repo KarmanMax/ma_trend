@@ -113,14 +113,33 @@ const timeframeLabels: Record<Timeframe, string> = {
   "1h": "1H",
   "2h": "2H",
   "4h": "4H",
-  "1d": "1D"
+  "1d": "1D",
+  "1w": "1W"
 };
 
 const symbolLabels: Record<SymbolCode, string> = {
+  AAPL: "Apple (AAPL)",
+  MSFT: "Microsoft (MSFT)",
+  NVDA: "NVIDIA (NVDA)",
+  AMZN: "Amazon (AMZN)",
+  GOOGL: "Alphabet (GOOGL)",
+  META: "Meta (META)",
+  "BRK-B": "Berkshire Hathaway (BRK-B)",
+  JPM: "JPMorgan Chase (JPM)",
+  V: "Visa (V)",
+  MA: "Mastercard (MA)",
+  WMT: "Walmart (WMT)",
+  COST: "Costco (COST)",
+  UNH: "UnitedHealth (UNH)",
+  XOM: "Exxon Mobil (XOM)",
   BTC: "BTC",
   ETH: "ETH",
   SOL: "SOL",
   BNB: "BNB",
+  XRP: "XRP",
+  ADA: "ADA",
+  DOGE: "DOGE",
+  AVAX: "AVAX",
   ENA: "ENA",
   SUI: "SUI",
   UNI: "UNI",
@@ -150,6 +169,18 @@ const symbolLabels: Record<SymbolCode, string> = {
   INTC: "INTC",
   ARM: "ARM",
   AMD: "AMD",
+  ASML: "ASML",
+  QCOM: "Qualcomm (QCOM)",
+  TXN: "Texas Instruments (TXN)",
+  AMAT: "Applied Materials (AMAT)",
+  LRCX: "Lam Research (LRCX)",
+  KLAC: "KLA (KLAC)",
+  ADI: "Analog Devices (ADI)",
+  NXPI: "NXP Semiconductors (NXPI)",
+  MCHP: "Microchip Technology (MCHP)",
+  ON: "ON Semiconductor (ON)",
+  MPWR: "Monolithic Power Systems (MPWR)",
+  TER: "Teradyne (TER)",
   XIAOMI: "Xiaomi (01810.HK)",
   BABA: "BABA",
   BIDU: "BIDU",
@@ -242,6 +273,7 @@ export function App() {
             <p className="text-sm text-muted">Multi-asset trend backtesting workstation</p>
           </div>
           <div className="flex items-center gap-4">
+            <a className="text-sm font-medium text-accent hover:underline" href="/levels/">支撑/阻力扫描</a>
             <a className="text-sm font-medium text-accent hover:underline" href="/wyckoff/">Wyckoff workspace</a>
             <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted">
               <Activity size={16} />

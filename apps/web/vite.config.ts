@@ -8,7 +8,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         trend: fileURLToPath(new URL("./index.html", import.meta.url)),
-        wyckoff: fileURLToPath(new URL("./wyckoff/index.html", import.meta.url))
+        wyckoff: fileURLToPath(new URL("./wyckoff/index.html", import.meta.url)),
+        levels: fileURLToPath(new URL("./levels/index.html", import.meta.url))
       }
     }
   },

@@ -210,5 +210,9 @@ function timeframeMinutes(timeframe: Timeframe): number {
     return value * 24 * 60;
   }
 
+  if (unit === "w") {
+    return value * 7 * 24 * 60;
+  }
+
   throw new Error(`Unsupported timeframe: ${timeframe}`);
 }

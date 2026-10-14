@@ -34,6 +34,10 @@ const binanceSymbolMap: Partial<Record<SymbolCode, string>> = {
   ETH: "ETHUSDT",
   SOL: "SOLUSDT",
   BNB: "BNBUSDT",
+  XRP: "XRPUSDT",
+  ADA: "ADAUSDT",
+  DOGE: "DOGEUSDT",
+  AVAX: "AVAXUSDT",
   ENA: "ENAUSDT",
   SUI: "SUIUSDT",
   UNI: "UNIUSDT",
@@ -52,6 +56,20 @@ const binanceSymbolMap: Partial<Record<SymbolCode, string>> = {
 };
 
 const yahooSymbolMap: Partial<Record<SymbolCode, string>> = {
+  AAPL: "AAPL",
+  MSFT: "MSFT",
+  NVDA: "NVDA",
+  AMZN: "AMZN",
+  GOOGL: "GOOGL",
+  META: "META",
+  "BRK-B": "BRK-B",
+  JPM: "JPM",
+  V: "V",
+  MA: "MA",
+  WMT: "WMT",
+  COST: "COST",
+  UNH: "UNH",
+  XOM: "XOM",
   SKHYNIX: "000660.KS",
   MU: "MU",
   MRVL: "MRVL",
@@ -66,6 +84,18 @@ const yahooSymbolMap: Partial<Record<SymbolCode, string>> = {
   INTC: "INTC",
   ARM: "ARM",
   AMD: "AMD",
+  ASML: "ASML",
+  QCOM: "QCOM",
+  TXN: "TXN",
+  AMAT: "AMAT",
+  LRCX: "LRCX",
+  KLAC: "KLAC",
+  ADI: "ADI",
+  NXPI: "NXPI",
+  MCHP: "MCHP",
+  ON: "ON",
+  MPWR: "MPWR",
+  TER: "TER",
   XIAOMI: "1810.HK",
   BABA: "BABA",
   BIDU: "BIDU",
@@ -98,7 +128,8 @@ const timeframeMs: Record<Timeframe, number> = {
   "1h": 60 * 60_000,
   "2h": 2 * 60 * 60_000,
   "4h": 4 * 60 * 60_000,
-  "1d": 24 * 60 * 60_000
+  "1d": 24 * 60 * 60_000,
+  "1w": 7 * 24 * 60 * 60_000
 };
 
 export class BinanceMarketDataProvider implements MarketDataProvider {
@@ -115,12 +146,16 @@ export class BinanceMarketDataProvider implements MarketDataProvider {
       throw new Error(`Symbol ${request.symbol} is not supported by BinanceMarketDataProvider`);
     }
 
+    return this.getCandlesByPair(exchangeSymbol, request);
+  }
+
+  async getCandlesByPair(pair: string, request: Omit<GetCandlesRequest, "symbol"> & { symbol: string }): Promise<Candle[]> {
     const candles: Candle[] = [];
     let cursor = request.startTime;
 
     while (cursor < request.endTime) {
       const url = new URL("/api/v3/klines", this.baseUrl);
-      url.searchParams.set("symbol", exchangeSymbol);
+      url.searchParams.set("symbol", pair);
       url.searchParams.set("interval", request.timeframe);
       url.searchParams.set("startTime", String(cursor));
       url.searchParams.set("endTime", String(request.endTime));
@@ -270,6 +305,9 @@ export class RoutedMarketDataProvider implements MarketDataProvider {
 function toYahooInterval(timeframe: Timeframe): string {
   if (timeframe === "1h") {
     return "60m";
+  }
+  if (timeframe === "1w") {
+    return "1wk";
   }
 
   return timeframe;

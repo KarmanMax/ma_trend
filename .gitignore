@@ -6,3 +6,5 @@ prisma/*.db
 prisma/*.db-journal
 apps/web/dist
 .DS_Store
+.pnpm-store/
+

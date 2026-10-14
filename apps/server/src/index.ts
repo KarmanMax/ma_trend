@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { ZodError } from "zod";
 import { markInterruptedWyckoffScans, wyckoffRouter } from "./wyckoff";
 import { prisma } from "./db";
+import { levelsRouter } from "./levels";
 
 const serverDir = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: resolve(serverDir, "../../../.env") });
@@ -24,6 +25,7 @@ app.use(cors({
 app.options("*", cors({ origin: process.env.NODE_ENV === "production" ? resolveCorsOrigin : true }));
 app.use(express.json({ limit: "1mb" }));
 app.use("/api/wyckoff", wyckoffRouter);
+app.use("/api/levels", levelsRouter);
 
 app.get("/api/health", (_request, response) => {
   response.json({ ok: true });
