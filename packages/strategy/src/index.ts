@@ -1,5 +1,5 @@
 import { adx, atr, ema, macd, sma } from "@trend-trade/indicator";
-import type { Candle, EmaTrendStrategyConfig, MacdTrendStrategyConfig, Signal, StrategyConfig } from "@trend-trade/shared";
+import type { Candle, EmaTrendStrategyConfig, MacdMomentumStrategyConfig, MacdTrendStrategyConfig, Signal, StrategyConfig } from "@trend-trade/shared";
 import type { IncrementalStrategySession } from "./incremental";
 
 export * from "./incremental";
@@ -142,7 +142,7 @@ export class EmaTrendStrategy implements Strategy<EmaTrendStrategyConfig> {
 }
 
 function entryFilterFailure(
-  config: EmaTrendStrategyConfig | MacdTrendStrategyConfig,
+  config: EmaTrendStrategyConfig | MacdTrendStrategyConfig | MacdMomentumStrategyConfig,
   currentAtr: number | null,
   currentAdx: number | null,
   currentVolumeMa: number | null,
@@ -232,9 +232,74 @@ export class MacdTrendStrategy implements Strategy<MacdTrendStrategyConfig> {
   }
 }
 
+export class MacdMomentumStrategy implements Strategy<MacdMomentumStrategyConfig> {
+  readonly id = "MACD_MOMENTUM";
+  readonly name = "MACD Histogram Momentum Reversal";
+  private readonly macdSeries: ReturnType<typeof macd>;
+  private readonly atrSeries: Array<number | null>;
+  private readonly adxSeries: Array<number | null>;
+  private readonly volumeMaSeries: Array<number | null>;
+
+  constructor(private readonly candles: Candle[], private readonly config: MacdMomentumStrategyConfig) {
+    this.macdSeries = macd(candles.map((candle) => candle.close), config.macdFastPeriod, config.macdSlowPeriod, config.macdSignalPeriod);
+    this.atrSeries = atr(candles, config.atrPeriod);
+    this.adxSeries = adx(candles, config.adxPeriod);
+    this.volumeMaSeries = sma(candles.map((candle) => candle.volume), config.volumeMaPeriod);
+  }
+
+  generateSignal({ index }: StrategyContext<MacdMomentumStrategyConfig>): Signal {
+    const twoBarsAgo = this.macdSeries.histogram[index - 2];
+    const previous = this.macdSeries.histogram[index - 1];
+    const current = this.macdSeries.histogram[index];
+    const currentLine = this.macdSeries.line[index];
+    if (twoBarsAgo == null || previous == null || current == null || currentLine == null) {
+      return { type: "HOLD", reason: "Waiting for MACD histogram warmup" };
+    }
+
+    // A fill-state switch is meaningful only within bars on the same side of zero.
+    // On either side, a slope reversal upward is bullish and downward is bearish.
+    const sameColor = Math.sign(twoBarsAgo) === Math.sign(previous) && Math.sign(previous) === Math.sign(current) && current !== 0;
+    const previousSlope = previous - twoBarsAgo;
+    const currentSlope = current - previous;
+    const turnedUp = sameColor && previousSlope <= 0 && currentSlope > 0;
+    const turnedDown = sameColor && previousSlope >= 0 && currentSlope < 0;
+    if (!turnedUp && !turnedDown) {
+      return { type: "HOLD", reason: "No MACD histogram fill-state change" };
+    }
+
+    const exitEnabled = this.config.exitTrigger === "MACD_MOMENTUM";
+    const reason = turnedUp ? "MACD histogram turned upward" : "MACD histogram turned downward";
+    const closeType = turnedUp ? "CLOSE_SHORT" : "CLOSE_LONG";
+    const directionExcluded = turnedUp ? this.config.direction === "SHORT_ONLY" : this.config.direction === "LONG_ONLY";
+    if (directionExcluded) {
+      return exitEnabled ? { type: closeType, reason } : { type: "HOLD", reason: "MACD momentum exit trigger disabled" };
+    }
+
+    const candle = this.candles[index];
+    const nearZero = Math.abs(currentLine) / candle.close * 100 <= this.config.zeroProximityPct;
+    const filterFailure = this.config.zeroFilterEnabled && !nearZero
+      ? `MACD line is farther than ${this.config.zeroProximityPct}% of price from zero`
+      : entryFilterFailure(this.config, this.atrSeries[index], this.adxSeries[index], this.volumeMaSeries[index], candle);
+    if (filterFailure) {
+      return exitEnabled ? { type: closeType, reason: `${reason}; ${filterFailure}` } : { type: "HOLD", reason: filterFailure };
+    }
+
+    const currentAtr = this.atrSeries[index];
+    return {
+      type: turnedUp ? "BUY" : "SELL_SHORT",
+      reason,
+      stopPrice: this.config.atrStopEnabled && currentAtr !== null
+        ? candle.close + (turnedUp ? -1 : 1) * currentAtr * this.config.atrMultiplier
+        : undefined,
+      allowPositionFlip: exitEnabled
+    };
+  }
+}
+
 export function createDefaultStrategyRegistry(candles: Candle[]): StrategyRegistry {
   const registry = new StrategyRegistry();
   registry.register("EMA_TREND", (config) => new EmaTrendStrategy(candles, config));
   registry.register("MACD_TREND", (config) => new MacdTrendStrategy(candles, config));
+  registry.register("MACD_MOMENTUM", (config) => new MacdMomentumStrategy(candles, config));
   return registry;
 }

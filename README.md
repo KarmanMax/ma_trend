@@ -57,6 +57,8 @@ Trend indicators: `MA` (simple moving average), `EMA`, or a separate `MACD_TREND
 
 The MACD strategy uses the MACD line (fast EMA minus slow EMA) crossing its signal EMA on completed bars. Defaults are 12/26/9. A golden cross opens long and a death cross opens short; direction settings can restrict entries. With `exitTrigger = MACD`, the opposite cross closes or flips the current position. Optional `zeroFilterEnabled` applies only to entries: `abs(MACD line) / close * 100` must be at most `zeroProximityPct` (default 0.5%). Reverse exits still fire when the filter blocks a new entry. ATR stops, ADX, and volume filters work as they do for the MA/EMA strategy. The MACD line, signal, and histogram are saved with each chart point and shown below the price chart.
 
+The separate `MACD_MOMENTUM` strategy detects a histogram fill-state change on completed bars. It requires three consecutive histogram bars on the same side of zero, avoiding duplicate zero-cross signals. A histogram slope reversal upward opens long; a reversal downward opens short. This corresponds to solid/hollow transitions for both positive and negative histogram bars. With `exitTrigger = MACD_MOMENTUM`, the opposite signal closes or flips the current position. The MACD periods and optional entry filters are shared with the cross strategy.
+
 Symbol:
 
 - `BTC`

@@ -119,6 +119,29 @@ describe("backtest strategy paths", () => {
     expect(result.chartPoints[4].trendEma).toBeUndefined();
   });
 
+  it("executes MACD histogram fill-state reversals", async () => {
+    const bars = [10, 10, 10, 9, 10, 10, 13, 13, 11].map((close, index) => candle(index, close));
+    const momentumConfig: BacktestConfig = {
+      ...config,
+      strategy: {
+        ...config.strategy,
+        type: "MACD_MOMENTUM",
+        macdFastPeriod: 2,
+        macdSlowPeriod: 3,
+        macdSignalPeriod: 2,
+        zeroFilterEnabled: false,
+        zeroProximityPct: 0.5,
+        exitTrigger: "MACD_MOMENTUM"
+      }
+    };
+    const result = await new BacktestEngine(provider(bars)).run(momentumConfig);
+
+    expect(result.trades).toHaveLength(2);
+    expect(result.trades[0]).toMatchObject({ side: "LONG", entryTime: bars[6].closeTime, exitTime: bars[7].closeTime });
+    expect(result.trades[1]).toMatchObject({ side: "SHORT", entryTime: bars[7].closeTime });
+    expect(result.chartPoints[6].macdHistogram).toBeGreaterThan(result.chartPoints[5].macdHistogram!);
+  });
+
   it("executes a Wyckoff entry and invalidation using the independent incremental backtest path", () => {
     const strategy = wyckoffStrategyConfigSchema.parse(defaultWyckoffStrategyConfig);
     const bar = (index: number, values: Partial<Candle> = {}): Candle => ({

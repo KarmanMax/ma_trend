@@ -32,4 +32,17 @@ describe("MACD backtest config", () => {
       strategy: { ...input.strategy, macdFastPeriod: 30 }
     }).success).toBe(false);
   });
+
+  it("parses the MACD histogram momentum strategy with its reverse-exit default", () => {
+    expect(backtestConfigSchema.parse({
+      ...input,
+      strategy: { ...input.strategy, type: "MACD_MOMENTUM" }
+    }).strategy).toMatchObject({
+      type: "MACD_MOMENTUM",
+      macdFastPeriod: 12,
+      macdSlowPeriod: 26,
+      macdSignalPeriod: 9,
+      exitTrigger: "MACD_MOMENTUM"
+    });
+  });
 });

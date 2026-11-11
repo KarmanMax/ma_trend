@@ -1,4 +1,4 @@
-import { supportedSymbols, supportedTimeframes, type BacktestConfig, type EmaTrendStrategyConfig, type MacdTrendStrategyConfig, type StrategyConfig, type SymbolCode, type Timeframe } from "@trend-trade/shared";
+import { type BacktestConfig, type SymbolCode, type Timeframe } from "@trend-trade/shared";
 import {
   CandlestickSeries,
   ColorType,
@@ -9,7 +9,7 @@ import {
   type IChartApi,
   type Time
 } from "lightweight-charts";
-import { Activity, BarChart3, History, Play, Settings2 } from "lucide-react";
+import { Activity, BarChart3, History } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
@@ -24,43 +24,8 @@ import {
 } from "recharts";
 import { createBacktest, getBacktest, listBacktests, type ApiBacktestDetail, type ApiBacktestRun } from "./lib/api";
 import { formatCurrency, formatDateTime, formatNumber, formatPercent } from "./lib/format";
+import { BacktestForm, defaultMacdStrategy } from "./components/BacktestForm";
 
-const defaultEmaStrategy: EmaTrendStrategyConfig = {
-    type: "EMA_TREND",
-    trendEmaPeriod: 200,
-    trendMaType: "MA",
-    atrPeriod: 14,
-    atrMultiplier: 2,
-    atrStopEnabled: false,
-    adxPeriod: 14,
-    adxThreshold: 20,
-    adxFilterEnabled: false,
-    volumeMaPeriod: 20,
-    volumeMultiplier: 1,
-    volumeFilterEnabled: false,
-    direction: "LONG_SHORT",
-    exitTrigger: "EMA"
-};
-
-const defaultMacdStrategy: MacdTrendStrategyConfig = {
-  type: "MACD_TREND",
-  macdFastPeriod: 12,
-  macdSlowPeriod: 26,
-  macdSignalPeriod: 9,
-  zeroFilterEnabled: false,
-  zeroProximityPct: 0.5,
-  atrPeriod: 14,
-  atrMultiplier: 2,
-  atrStopEnabled: false,
-  adxPeriod: 14,
-  adxThreshold: 20,
-  adxFilterEnabled: false,
-  volumeMaPeriod: 20,
-  volumeMultiplier: 1,
-  volumeFilterEnabled: false,
-  direction: "LONG_SHORT",
-  exitTrigger: "MACD"
-};
 
 const defaultConfig: BacktestConfig = {
   symbol: "ETH",
@@ -73,24 +38,6 @@ const defaultConfig: BacktestConfig = {
   strategy: defaultMacdStrategy
 };
 
-function switchTrendStrategy(current: StrategyConfig, indicator: string): StrategyConfig {
-  const common = {
-    atrPeriod: current.atrPeriod,
-    atrMultiplier: current.atrMultiplier,
-    atrStopEnabled: current.atrStopEnabled,
-    adxPeriod: current.adxPeriod,
-    adxThreshold: current.adxThreshold,
-    adxFilterEnabled: current.adxFilterEnabled,
-    volumeMaPeriod: current.volumeMaPeriod,
-    volumeMultiplier: current.volumeMultiplier,
-    volumeFilterEnabled: current.volumeFilterEnabled,
-    direction: current.direction
-  };
-  if (indicator === "MACD") {
-    return { ...defaultMacdStrategy, ...common };
-  }
-  return { ...defaultEmaStrategy, ...common, trendMaType: indicator as "MA" | "EMA" };
-}
 
 function defaultEndTime(): string {
   const end = new Date();
@@ -267,15 +214,15 @@ export function App() {
   return (
     <main className="min-h-screen bg-background">
       <header className="border-b border-border bg-panel">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
           <div>
             <h1 className="text-xl font-semibold tracking-normal">Trend Trade</h1>
             <p className="text-sm text-muted">Multi-asset trend backtesting workstation</p>
           </div>
-          <div className="flex items-center gap-4">
-            <a className="text-sm font-medium text-accent hover:underline" href="/levels/">支撑/阻力扫描</a>
-            <a className="text-sm font-medium text-accent hover:underline" href="/wyckoff/">Wyckoff workspace</a>
-            <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted">
+          <div className="flex flex-wrap items-center gap-4">
+            <a className="whitespace-nowrap text-sm font-medium text-accent hover:underline" href="/levels/">支撑/阻力扫描</a>
+            <a className="whitespace-nowrap text-sm font-medium text-accent hover:underline" href="/wyckoff/">Wyckoff workspace</a>
+            <div className="hidden items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted sm:flex">
               <Activity size={16} />
               MVP Backtest Engine
             </div>
@@ -283,194 +230,9 @@ export function App() {
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-5 px-6 py-6 lg:grid-cols-[360px_1fr]">
-        <section className="rounded-lg border border-border bg-panel p-4 shadow-panel">
-          <div className="mb-4 flex items-center gap-2">
-            <Settings2 size={18} />
-            <h2 className="text-base font-semibold">Parameters</h2>
-          </div>
-          <div className="grid gap-4">
-            <Field label="Symbol">
-              <select
-                className="input"
-                value={form.symbol}
-                onChange={(event) => setForm({ ...form, symbol: event.target.value as SymbolCode })}
-              >
-                {supportedSymbols.map((symbol) => (
-                  <option key={symbol} value={symbol}>
-                    {symbolLabels[symbol]}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Timeframe">
-              <select
-                className="input"
-                value={form.timeframe}
-                onChange={(event) => setForm({ ...form, timeframe: event.target.value as Timeframe })}
-              >
-                {supportedTimeframes.map((timeframe) => (
-                  <option key={timeframe} value={timeframe}>
-                    {timeframeLabels[timeframe]}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Start">
-              <input
-                className="input"
-                type="date"
-                value={form.startTime.slice(0, 10)}
-                onChange={(event) => setForm({ ...form, startTime: `${event.target.value}T00:00:00.000Z` })}
-              />
-            </Field>
-            <Field label="End">
-              <input
-                className="input"
-                type="date"
-                value={form.endTime.slice(0, 10)}
-                onChange={(event) => setForm({ ...form, endTime: `${event.target.value}T00:00:00.000Z` })}
-              />
-            </Field>
-            <NumberField label="Initial Capital" value={form.initialCapital} onChange={(value) => setForm({ ...form, initialCapital: value })} />
-            <NumberField label="Fee Rate" step="0.0001" value={form.feeRate} onChange={(value) => setForm({ ...form, feeRate: value })} />
-            <NumberField
-              label="Slippage Rate"
-              step="0.0001"
-              value={form.slippageRate}
-              onChange={(value) => setForm({ ...form, slippageRate: value })}
-            />
-            <div className="rounded-md border border-border p-3">
-              <div className="mb-3 text-sm font-medium">Trend Strategy</div>
-              <div className="mb-3">
-                <Field label="Trend Indicator">
-                  <select
-                    className="input"
-                    value={form.strategy.type === "MACD_TREND" ? "MACD" : form.strategy.trendMaType ?? "EMA"}
-                    onChange={(event) => {
-                      setForm({ ...form, strategy: switchTrendStrategy(form.strategy, event.target.value) });
-                    }}
-                  >
-                    <option value="MA">MA</option>
-                    <option value="EMA">EMA</option>
-                    <option value="MACD">MACD cross</option>
-                  </select>
-                </Field>
-              </div>
-              <div className="mb-3">
-                <Field label="Direction">
-                  <select
-                    className="input"
-                    value={form.strategy.direction}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-                        strategy: {
-                          ...form.strategy,
-                          direction: event.target.value as typeof form.strategy.direction
-                        }
-                      })
-                    }
-                  >
-                    <option value="LONG_SHORT">Long & Short</option>
-                    <option value="LONG_ONLY">Long Only</option>
-                    <option value="SHORT_ONLY">Short Only</option>
-                  </select>
-                </Field>
-              </div>
-              <div className="mb-3">
-                <Field label="Exit Trigger">
-                  <select
-                    className="input"
-                    value={form.strategy.exitTrigger}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-                        strategy: form.strategy.type === "MACD_TREND"
-                          ? { ...form.strategy, exitTrigger: event.target.value as "MACD" | "NONE" }
-                          : { ...form.strategy, exitTrigger: event.target.value as "EMA" | "NONE" }
-                      })
-                    }
-                  >
-                    <option value={form.strategy.type === "MACD_TREND" ? "MACD" : "EMA"}>
-                      {form.strategy.type === "MACD_TREND" ? "MACD" : form.strategy.trendMaType ?? "EMA"} reverse signal
-                    </option>
-                    <option value="NONE">None</option>
-                  </select>
-                </Field>
-              </div>
-              <div className="grid gap-4">
-                <div className="grid grid-cols-2 gap-3 rounded-md border border-border/70 bg-slate-50/60 p-3">
-                {form.strategy.type === "MACD_TREND" ? <>
-                  <NumberField compact label="MACD Fast" value={form.strategy.macdFastPeriod}
-                    onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, macdFastPeriod: value } as MacdTrendStrategyConfig })} />
-                  <NumberField compact label="MACD Slow" value={form.strategy.macdSlowPeriod}
-                    onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, macdSlowPeriod: value } as MacdTrendStrategyConfig })} />
-                  <NumberField compact label="MACD Signal" value={form.strategy.macdSignalPeriod}
-                    onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, macdSignalPeriod: value } as MacdTrendStrategyConfig })} />
-                  <CheckboxField label="Near zero only" checked={form.strategy.zeroFilterEnabled}
-                    onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, zeroFilterEnabled: value } as MacdTrendStrategyConfig })} />
-                  {form.strategy.zeroFilterEnabled ? <NumberField compact label="Zero proximity (% of price)" step="0.1"
-                    value={form.strategy.zeroProximityPct}
-                    onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, zeroProximityPct: value } as MacdTrendStrategyConfig })} /> : null}
-                </> : <NumberField
-                  compact
-                  label={`${form.strategy.trendMaType ?? "EMA"} Period`}
-                  value={form.strategy.trendEmaPeriod}
-                  onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, trendEmaPeriod: value } as EmaTrendStrategyConfig })}
-                />}
-                </div>
-                <div className="grid grid-cols-2 gap-3 rounded-md border border-border/70 bg-slate-50/60 p-3">
-                <CheckboxField
-                  label="ATR Stop"
-                  checked={form.strategy.atrStopEnabled}
-                  onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, atrStopEnabled: value } })}
-                />
-                <NumberField compact label="ATR Period" value={form.strategy.atrPeriod} onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, atrPeriod: value } })} />
-                <NumberField
-                  compact
-                  label="ATR Multiplier"
-                  value={form.strategy.atrMultiplier}
-                  onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, atrMultiplier: value } })}
-                />
-                </div>
-                <div className="grid grid-cols-2 gap-3 rounded-md border border-border/70 bg-slate-50/60 p-3">
-                <CheckboxField
-                  label="ADX Filter"
-                  checked={form.strategy.adxFilterEnabled}
-                  onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, adxFilterEnabled: value } })}
-                />
-                <NumberField compact label="ADX Period" value={form.strategy.adxPeriod} onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, adxPeriod: value } })} />
-                <NumberField compact label="ADX Threshold" value={form.strategy.adxThreshold} onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, adxThreshold: value } })} />
-                </div>
-                <div className="grid grid-cols-2 gap-3 rounded-md border border-border/70 bg-slate-50/60 p-3">
-                <CheckboxField
-                  label="Volume Filter"
-                  checked={form.strategy.volumeFilterEnabled}
-                  onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, volumeFilterEnabled: value } })}
-                />
-                <NumberField compact label="Volume MA" value={form.strategy.volumeMaPeriod} onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, volumeMaPeriod: value } })} />
-                <NumberField
-                  compact
-                  label="Volume Mult"
-                  step="0.1"
-                  value={form.strategy.volumeMultiplier}
-                  onChange={(value) => setForm({ ...form, strategy: { ...form.strategy, volumeMultiplier: value } })}
-                />
-                </div>
-              </div>
-            </div>
-            <button
-              className="flex h-10 items-center justify-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-white disabled:opacity-60"
-              disabled={loading}
-              onClick={() => void runBacktest()}
-            >
-              <Play size={16} />
-              {loading ? "Running" : "Run Backtest"}
-            </button>
-            {error ? <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-negative">{error}</div> : null}
-          </div>
-        </section>
+      <div className="mx-auto grid max-w-7xl grid-cols-1 items-start gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[360px_minmax(0,1fr)]">
+        <BacktestForm config={form} onChange={setForm} onSubmit={() => void runBacktest()} loading={loading} error={error}
+          symbolLabels={symbolLabels} timeframeLabels={timeframeLabels} />
 
         <section className="grid gap-5">
           <MetricsPanel result={result} />
@@ -512,48 +274,6 @@ export function App() {
   );
 }
 
-function Field(props: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="grid gap-1.5 text-sm">
-      <span className="font-medium">{props.label}</span>
-      {props.children}
-    </label>
-  );
-}
-
-function NumberField(props: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-  step?: string;
-  compact?: boolean;
-}) {
-  return (
-    <Field label={props.label}>
-      <input
-        className="input"
-        type="number"
-        step={props.step ?? "1"}
-        value={props.value}
-        onChange={(event) => props.onChange(Number(event.target.value))}
-      />
-    </Field>
-  );
-}
-
-function CheckboxField(props: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <label className="flex h-10 items-center gap-2 rounded-md border border-border bg-white px-3 text-sm">
-      <input
-        type="checkbox"
-        className="h-4 w-4 accent-accent"
-        checked={props.checked}
-        onChange={(event) => props.onChange(event.target.checked)}
-      />
-      <span className="font-medium">{props.label}</span>
-    </label>
-  );
-}
 
 function MetricsPanel({ result }: { result: ApiBacktestDetail | null }) {
   const metrics = result?.metrics;
@@ -673,7 +393,7 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
     let macdLineSeries: ReturnType<typeof chart.addSeries> | null = null;
     let macdSignalSeries: ReturnType<typeof chart.addSeries> | null = null;
     let macdHistogramSeries: ReturnType<typeof chart.addSeries> | null = null;
-    if (result.config.strategy.type === "MACD_TREND") {
+    if (result.config.strategy.type === "MACD_TREND" || result.config.strategy.type === "MACD_MOMENTUM") {
       macdLineSeries = chart.addSeries(LineSeries, {
         color: "#2563eb",
         lineWidth: 2,
@@ -792,7 +512,7 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
       <div className="mb-3 flex flex-wrap gap-4 text-xs text-muted">
         {result.config.strategy.type === "EMA_TREND" ? <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#9333ea]" /> {result.config.strategy.trendMaType ?? "EMA"} {result.config.strategy.trendEmaPeriod}</span> : null}
         <span className="inline-flex items-center gap-1"><span className="h-2 w-4 bg-[#98a2b3]" /> Volume</span>
-        {result.config.strategy.type === "MACD_TREND" ? <>
+        {result.config.strategy.type === "MACD_TREND" || result.config.strategy.type === "MACD_MOMENTUM" ? <>
           <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#2563eb]" /> MACD</span>
           <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#f59e0b]" /> Signal</span>
         </> : null}

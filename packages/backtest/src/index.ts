@@ -2,7 +2,7 @@ import { SimulatedExecutionEngine, type ExecutionEngine } from "@trend-trade/exe
 import { adx, atr, calculateDrawdownCurve, calculateMetrics, ema, macd, sma } from "@trend-trade/indicator";
 import type { MarketDataProvider } from "@trend-trade/market-data";
 import { SimulatedPortfolio, type Portfolio } from "@trend-trade/portfolio";
-import type { BacktestChartPoint, BacktestConfig, BacktestResult, Candle, EmaTrendStrategyConfig, MacdTrendStrategyConfig, Signal } from "@trend-trade/shared";
+import type { BacktestChartPoint, BacktestConfig, BacktestResult, Candle, EmaTrendStrategyConfig, MacdMomentumStrategyConfig, MacdTrendStrategyConfig, Signal } from "@trend-trade/shared";
 import { createDefaultStrategyRegistry, createStrategyConfigKey, IncrementalStrategyRunner, type StrategyFactory } from "@trend-trade/strategy";
 
 export * from "./incremental";
@@ -89,7 +89,7 @@ export class BacktestEngine {
       timeframe: config.timeframe
     });
     const chartPoints = runner ? createBaseChartPoints(processedCandles)
-      : config.strategy.type === "MACD_TREND" ? createMacdChartPoints(processedCandles, config.strategy)
+      : config.strategy.type === "MACD_TREND" || config.strategy.type === "MACD_MOMENTUM" ? createMacdChartPoints(processedCandles, config.strategy)
       : createTrendChartPoints(processedCandles, config.strategy);
 
     return {
@@ -132,7 +132,7 @@ function createTrendChartPoints(candles: Candle[], config: EmaTrendStrategyConfi
   }));
 }
 
-function createMacdChartPoints(candles: Candle[], config: MacdTrendStrategyConfig): BacktestChartPoint[] {
+function createMacdChartPoints(candles: Candle[], config: MacdTrendStrategyConfig | MacdMomentumStrategyConfig): BacktestChartPoint[] {
   const basePoints = createBaseChartPoints(candles);
   const series = macd(candles.map((candle) => candle.close), config.macdFastPeriod, config.macdSlowPeriod, config.macdSignalPeriod);
   const atrSeries = atr(candles, config.atrPeriod);
