@@ -1,20 +1,27 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Activity, BarChart3, ChevronDown, LoaderCircle, Play, Settings2, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import {
+  dailyCandleStartHours,
+  defaultDailyCandleStartHour,
+  defaultLevelMinClearanceAtr,
+  supportsDailyCandleStart,
   supportedSymbols,
   supportedTimeframes,
   type BacktestConfig,
+  type DailyCandleStartHour,
   type EmaTrendStrategyConfig,
   type MacdTrendStrategyConfig,
   type StrategyConfig,
   type SymbolCode,
   type Timeframe
 } from "@trend-trade/shared";
+import { formatDailyCandleStartHour } from "../lib/format";
 
-const defaultEmaStrategy: EmaTrendStrategyConfig = {
+export const defaultMaStrategy: EmaTrendStrategyConfig = {
   type: "EMA_TREND",
-  trendEmaPeriod: 200,
+  trendEmaPeriod: 60,
   trendMaType: "MA",
+  trendTriggerMode: "CLOSE_CROSS",
   atrPeriod: 14,
   atrMultiplier: 2,
   atrStopEnabled: false,
@@ -28,7 +35,7 @@ const defaultEmaStrategy: EmaTrendStrategyConfig = {
   exitTrigger: "EMA"
 };
 
-export const defaultMacdStrategy: MacdTrendStrategyConfig = {
+const defaultMacdStrategy: MacdTrendStrategyConfig = {
   type: "MACD_TREND",
   macdFastPeriod: 12,
   macdSlowPeriod: 26,
@@ -59,6 +66,10 @@ function switchTrendStrategy(current: StrategyConfig, indicator: string): Strate
     volumeMaPeriod: current.volumeMaPeriod,
     volumeMultiplier: current.volumeMultiplier,
     volumeFilterEnabled: current.volumeFilterEnabled,
+    levelFilterEnabled: current.levelFilterEnabled,
+    levelMinClearanceAtr: current.levelMinClearanceAtr,
+    lossCooldownBars: current.lossCooldownBars,
+    resumeEntryAfterCooldown: current.resumeEntryAfterCooldown,
     direction: current.direction
   };
   if (indicator === "MACD" || indicator === "MACD_MOMENTUM") {
@@ -71,9 +82,15 @@ function switchTrendStrategy(current: StrategyConfig, indicator: string): Strate
     } as StrategyConfig;
   }
   return {
-    ...defaultEmaStrategy,
+    ...defaultMaStrategy,
     ...common,
-    ...(current.type === "EMA_TREND" ? { trendEmaPeriod: current.trendEmaPeriod } : {}),
+    ...(current.type === "EMA_TREND" ? {
+      trendEmaPeriod: current.trendEmaPeriod,
+      trendTriggerMode: current.trendTriggerMode,
+      exitOnFailedBreakout: current.exitOnFailedBreakout,
+      keepCooldownSignalsByDirection: current.keepCooldownSignalsByDirection,
+      filterExtendedCooldownEntries: current.filterExtendedCooldownEntries
+    } : {}),
     trendMaType: indicator as "MA" | "EMA",
     exitTrigger: current.exitTrigger === "NONE" ? "NONE" : "EMA"
   };
@@ -96,8 +113,11 @@ export function BacktestForm({ config, onChange, onSubmit, loading, error, symbo
   const macdErrorId = useId();
   const invalidDateRange = !(Date.parse(config.startTime) < Date.parse(config.endTime));
   const dateErrorId = useId();
+  const canSetDailyCandleStart = supportsDailyCandleStart(config.symbol, config.timeframe);
   const [costsOpen, setCostsOpen] = useState(false);
-  const enabledFilters = [strategy.atrStopEnabled, strategy.adxFilterEnabled, strategy.volumeFilterEnabled].filter(Boolean).length;
+  const lossCooldownBars = strategy.lossCooldownBars ?? 0;
+  const enabledFilters = [strategy.atrStopEnabled, strategy.adxFilterEnabled, strategy.volumeFilterEnabled,
+    strategy.levelFilterEnabled, lossCooldownBars > 0].filter(Boolean).length;
   const reverseExit = strategy.type === "EMA_TREND" ? "EMA" : strategy.type === "MACD_TREND" ? "MACD" : "MACD_MOMENTUM";
 
   function updateStrategy(patch: Partial<StrategyConfig>) {
@@ -137,6 +157,14 @@ export function BacktestForm({ config, onChange, onSubmit, loading, error, symbo
                 </select>
               </Field>
             </div>
+            {canSetDailyCandleStart && (
+              <Field label="Daily candle start (UTC+8)">
+                <select className="input" value={config.dailyCandleStartHour ?? defaultDailyCandleStartHour}
+                  onChange={(event) => onChange({ ...config, dailyCandleStartHour: Number(event.target.value) as DailyCandleStartHour })}>
+                  {dailyCandleStartHours.map((hour) => <option key={hour} value={hour}>{formatDailyCandleStartHour(hour)}</option>)}
+                </select>
+              </Field>
+            )}
             <div className="form-date-grid">
               <Field label="Start date">
                 <input className="input" type="date" required aria-invalid={invalidDateRange || undefined} aria-describedby={invalidDateRange ? dateErrorId : undefined}
@@ -149,6 +177,7 @@ export function BacktestForm({ config, onChange, onSubmit, loading, error, symbo
                   onInput={(event) => onChange({ ...config, endTime: `${event.currentTarget.value}T00:00:00.000Z` })} />
               </Field>
             </div>
+            {canSetDailyCandleStart && <p className="form-help">Beijing dates. The end date is excluded.</p>}
             {invalidDateRange ? <p id={dateErrorId} role="alert" className="text-xs text-negative">Start date must be before end date.</p> : null}
             <NumberField label="Initial capital" value={config.initialCapital} min={0.01} step="any" suffix="USD"
               onChange={(value) => onChange({ ...config, initialCapital: value })} />
@@ -159,8 +188,8 @@ export function BacktestForm({ config, onChange, onSubmit, loading, error, symbo
             <Field label="Signal model">
               <select className="input" value={strategy.type === "EMA_TREND" ? strategy.trendMaType ?? "EMA" : strategy.type === "MACD_TREND" ? "MACD" : "MACD_MOMENTUM"}
                 onChange={(event) => onChange({ ...config, strategy: switchTrendStrategy(strategy, event.target.value) })}>
-                <option value="MA">MA · Price crossover</option>
-                <option value="EMA">EMA · Price crossover</option>
+                <option value="MA">MA</option>
+                <option value="EMA">EMA</option>
                 <option value="MACD">MACD · Signal crossover</option>
                 <option value="MACD_MOMENTUM">MACD · Momentum reversal</option>
               </select>
@@ -196,8 +225,24 @@ export function BacktestForm({ config, onChange, onSubmit, loading, error, symbo
                 </div>
               </div>
             ) : strategy.type === "EMA_TREND" ? (
-              <NumberField label={`${strategy.trendMaType ?? "EMA"} period`} value={strategy.trendEmaPeriod} min={1} suffix="bars"
-                onChange={(value) => updateStrategy({ trendEmaPeriod: value })} />
+              <>
+                <Field label="Signal trigger">
+                  <select className="input" value={strategy.trendTriggerMode ?? "INTRABAR_TOUCH"}
+                    onChange={(event) => updateStrategy({ trendTriggerMode: event.target.value as EmaTrendStrategyConfig["trendTriggerMode"] })}>
+                    <option value="INTRABAR_TOUCH">Intrabar price touch</option>
+                    <option value="CLOSE_CROSS">Candle close crossover</option>
+                  </select>
+                </Field>
+                {strategy.trendTriggerMode !== "CLOSE_CROSS" ? (
+                  <label className="flex items-start gap-2 text-xs">
+                    <input type="checkbox" checked={strategy.exitOnFailedBreakout ?? false}
+                      onChange={(event) => updateStrategy({ exitOnFailedBreakout: event.target.checked })} />
+                    Exit new positions if the entry bar closes back across the average
+                  </label>
+                ) : null}
+                <NumberField label={`${strategy.trendMaType ?? "EMA"} period`} value={strategy.trendEmaPeriod} min={1} suffix="bars"
+                  onChange={(value) => updateStrategy({ trendEmaPeriod: value })} />
+              </>
             ) : null}
 
             <fieldset className="min-w-0">
@@ -235,6 +280,32 @@ export function BacktestForm({ config, onChange, onSubmit, loading, error, symbo
               </ToggleField>
             </div>
             <div className="filter-card">
+              <ToggleField label="Loss cooldown" description="Pause new entries after an ATR stop or a losing signal exit." checked={lossCooldownBars > 0}
+                onChange={(value) => updateStrategy({ lossCooldownBars: value ? 3 : 0 })}>
+                <NumberField label="Bars to wait" value={lossCooldownBars} min={1} max={Number.MAX_SAFE_INTEGER} suffix="bars"
+                  onChange={(value) => updateStrategy({ lossCooldownBars: value })} />
+                <label className="flex items-center gap-2 text-xs">
+                  <input type="checkbox" checked={strategy.resumeEntryAfterCooldown ?? false}
+                    onChange={(event) => updateStrategy({ resumeEntryAfterCooldown: event.target.checked })} />
+                  Recheck pending entries after cooldown
+                </label>
+                {strategy.type === "EMA_TREND" && strategy.trendTriggerMode !== "CLOSE_CROSS" && strategy.resumeEntryAfterCooldown && (
+                  <label className="flex items-center gap-2 text-xs">
+                    <input type="checkbox" checked={strategy.keepCooldownSignalsByDirection ?? false}
+                      onChange={(event) => updateStrategy({ keepCooldownSignalsByDirection: event.target.checked })} />
+                    Keep one pending entry per direction
+                  </label>
+                )}
+                {strategy.type === "EMA_TREND" && strategy.resumeEntryAfterCooldown && (
+                  <label className="flex items-center gap-2 text-xs">
+                    <input type="checkbox" checked={strategy.filterExtendedCooldownEntries ?? false}
+                      onChange={(event) => updateStrategy({ filterExtendedCooldownEntries: event.target.checked })} />
+                    Skip rechecks at least 2 ATR from the average with 20-bar momentum in the entry direction
+                  </label>
+                )}
+              </ToggleField>
+            </div>
+            <div className="filter-card">
               <ToggleField label="ADX trend filter" description={strategy.adxFilterEnabled ? "Only enter when ADX meets the minimum." : "Filter out signals in weaker trends."} checked={strategy.adxFilterEnabled}
                 onChange={(value) => updateStrategy({ adxFilterEnabled: value })}>
                 <div className="grid grid-cols-2 gap-3">
@@ -250,6 +321,13 @@ export function BacktestForm({ config, onChange, onSubmit, loading, error, symbo
                   <NumberField label="Volume MA" value={strategy.volumeMaPeriod} min={1} suffix="bars" onChange={(value) => updateStrategy({ volumeMaPeriod: value })} />
                   <NumberField label="Multiplier" ariaLabel="Volume multiplier" value={strategy.volumeMultiplier} min={0.1} step="0.1" suffix="×" onChange={(value) => updateStrategy({ volumeMultiplier: value })} />
                 </div>
+              </ToggleField>
+            </div>
+            <div className="filter-card">
+              <ToggleField label="Support / resistance filter" description="Require room to the next resistance for longs or support for shorts."
+                checked={strategy.levelFilterEnabled ?? false} onChange={(value) => updateStrategy({ levelFilterEnabled: value })}>
+                <NumberField label="Minimum clearance" value={strategy.levelMinClearanceAtr ?? defaultLevelMinClearanceAtr}
+                  min={0.1} step="any" suffix="ATR" onChange={(value) => updateStrategy({ levelMinClearanceAtr: value })} />
               </ToggleField>
             </div>
           </section>

@@ -8,18 +8,19 @@ datasource db {
 }
 
 model BacktestRun {
-  id             String   @id @default(cuid())
-  symbol         String
-  timeframe      String
-  strategyType   String
-  status         String
-  initialCapital Float
-  feeRate        Float
-  slippageRate   Float
-  startTime      DateTime
-  endTime        DateTime
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                   String   @id @default(cuid())
+  symbol               String
+  timeframe            String
+  dailyCandleStartHour Int?
+  strategyType         String
+  status               String
+  initialCapital       Float
+  feeRate              Float
+  slippageRate         Float
+  startTime            DateTime
+  endTime              DateTime
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   strategyConfig StrategyConfig?
   metrics        Metrics?

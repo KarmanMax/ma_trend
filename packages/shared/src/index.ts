@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const supportedSymbols = [
+const cryptoSymbols = [
   "BTC",
   "ETH",
   "SOL",
@@ -23,7 +23,11 @@ export const supportedSymbols = [
   "JUP",
   "KMNO",
   "CAKE",
-  "LDO",
+  "LDO"
+] as const;
+
+export const supportedSymbols = [
+  ...cryptoSymbols,
   "AAPL",
   "MSFT",
   "NVDA",
@@ -86,10 +90,37 @@ export const supportedSymbols = [
   "DRAM",
   "LYTE"
 ] as const;
-export const supportedTimeframes = ["1m", "2m", "5m", "15m", "30m", "1h", "2h", "4h", "1d", "1w"] as const;
+export const supportedTimeframes = ["1m", "2m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "1w"] as const;
 
 export type SymbolCode = (typeof supportedSymbols)[number];
 export type Timeframe = (typeof supportedTimeframes)[number];
+
+export const dailyCandleStartHours = [0, 4, 8, 12, 16, 20] as const;
+export type DailyCandleStartHour = (typeof dailyCandleStartHours)[number];
+export const defaultDailyCandleStartHour: DailyCandleStartHour = 0;
+export const legacyDailyCandleStartHour: DailyCandleStartHour = 8;
+export const beijingUtcOffsetHours = 8;
+
+const cryptoSymbolSet = new Set<SymbolCode>(cryptoSymbols);
+
+export function supportsDailyCandleStart(symbol: SymbolCode, timeframe: Timeframe): boolean {
+  return timeframe === "1d" && cryptoSymbolSet.has(symbol);
+}
+
+export const timeframeMilliseconds: Readonly<Record<Timeframe, number>> = {
+  "1m": 60_000,
+  "2m": 2 * 60_000,
+  "5m": 5 * 60_000,
+  "15m": 15 * 60_000,
+  "30m": 30 * 60_000,
+  "1h": 60 * 60_000,
+  "2h": 2 * 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "8h": 8 * 60 * 60_000,
+  "12h": 12 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
+  "1w": 7 * 24 * 60 * 60_000
+};
 
 export type Candle = {
   symbol: string;
@@ -103,16 +134,19 @@ export type Candle = {
   volume: number;
 };
 
-export type SignalType = "BUY" | "SELL_SHORT" | "CLOSE_LONG" | "CLOSE_SHORT" | "HOLD";
+export type EntrySignalType = "BUY" | "SELL_SHORT";
+export type SignalType = EntrySignalType | "CLOSE_LONG" | "CLOSE_SHORT" | "HOLD";
 
 export type Signal = {
   type: SignalType;
   reason?: string;
   stopPrice?: number;
   allowPositionFlip?: boolean;
+  trigger?: { price: number; at: "OPEN" | "INTRABAR" };
+  entryInvalidationLevel?: number;
 };
 
-export type TradeExitReason = "SIGNAL" | "STOP_LOSS" | "END_OF_BACKTEST";
+export type TradeExitReason = "SIGNAL" | "STOP_LOSS" | "FAILED_BREAKOUT" | "END_OF_BACKTEST";
 
 export type Trade = {
   id: string;
@@ -183,6 +217,10 @@ export type EmaTrendStrategyConfig = {
   type: "EMA_TREND";
   trendEmaPeriod: number;
   trendMaType?: "MA" | "EMA";
+  trendTriggerMode?: "INTRABAR_TOUCH" | "CLOSE_CROSS";
+  exitOnFailedBreakout?: boolean;
+  keepCooldownSignalsByDirection?: boolean;
+  filterExtendedCooldownEntries?: boolean;
   emaFast?: number;
   emaSlow?: number;
   atrPeriod: number;
@@ -194,11 +232,18 @@ export type EmaTrendStrategyConfig = {
   volumeMaPeriod: number;
   volumeMultiplier: number;
   volumeFilterEnabled: boolean;
+  levelFilterEnabled?: boolean;
+  levelMinClearanceAtr?: number;
+  lossCooldownBars?: number;
+  resumeEntryAfterCooldown?: boolean;
   direction: StrategyDirection;
   exitTrigger: StrategyExitTrigger;
 };
 
-type MacdStrategyConfigBase = Omit<EmaTrendStrategyConfig, "type" | "trendEmaPeriod" | "trendMaType" | "emaFast" | "emaSlow" | "exitTrigger"> & {
+type MacdStrategyConfigBase = Omit<EmaTrendStrategyConfig,
+  "type" | "trendEmaPeriod" | "trendMaType" | "trendTriggerMode" | "exitOnFailedBreakout" |
+  "keepCooldownSignalsByDirection" | "filterExtendedCooldownEntries" | "emaFast" | "emaSlow" | "exitTrigger"
+> & {
   macdFastPeriod: number;
   macdSlowPeriod: number;
   macdSignalPeriod: number;
@@ -266,6 +311,8 @@ export type WyckoffStrategyConfig = z.infer<typeof wyckoffStrategyConfigSchema>;
 export type BacktestConfig = {
   symbol: SymbolCode;
   timeframe: Timeframe;
+  /** Daily candle opening hour in Beijing time (UTC+8). */
+  dailyCandleStartHour?: DailyCandleStartHour;
   startTime: string;
   endTime: string;
   initialCapital: number;
@@ -285,10 +332,22 @@ export type BacktestResult = {
   trades: Trade[];
 };
 
+const lossCooldownBarsSchema = z.number().int().nonnegative().safe().optional();
+export const defaultLevelMinClearanceAtr = 1;
+const levelFilterFields = {
+  levelFilterEnabled: z.boolean().optional(),
+  levelMinClearanceAtr: z.number().finite().min(0.1).optional()
+};
+
 const emaTrendStrategyConfigSchema = z.object({
+  ...levelFilterFields,
   type: z.literal("EMA_TREND"),
   trendEmaPeriod: z.number().int().positive().optional(),
   trendMaType: z.enum(["MA", "EMA"]).default("MA"),
+  trendTriggerMode: z.enum(["INTRABAR_TOUCH", "CLOSE_CROSS"]).default("INTRABAR_TOUCH"),
+  exitOnFailedBreakout: z.boolean().optional(),
+  keepCooldownSignalsByDirection: z.boolean().optional(),
+  filterExtendedCooldownEntries: z.boolean().optional(),
   emaFast: z.number().int().positive().optional(),
   emaSlow: z.number().int().positive().optional(),
   atrPeriod: z.number().int().positive(),
@@ -300,6 +359,8 @@ const emaTrendStrategyConfigSchema = z.object({
   volumeMaPeriod: z.number().int().positive(),
   volumeMultiplier: z.number().positive(),
   volumeFilterEnabled: z.boolean().default(false),
+  lossCooldownBars: lossCooldownBarsSchema,
+  resumeEntryAfterCooldown: z.boolean().optional(),
   direction: z.enum(["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT"]),
   exitTrigger: z.enum(["EMA", "NONE"]).default("EMA")
 }).transform((value) => ({
@@ -308,6 +369,7 @@ const emaTrendStrategyConfigSchema = z.object({
 }));
 
 const macdTrendStrategyConfigSchema = z.object({
+  ...levelFilterFields,
   type: z.literal("MACD_TREND"),
   macdFastPeriod: z.number().int().positive().default(12),
   macdSlowPeriod: z.number().int().positive().default(26),
@@ -323,6 +385,8 @@ const macdTrendStrategyConfigSchema = z.object({
   volumeMaPeriod: z.number().int().positive(),
   volumeMultiplier: z.number().positive(),
   volumeFilterEnabled: z.boolean().default(false),
+  lossCooldownBars: lossCooldownBarsSchema,
+  resumeEntryAfterCooldown: z.boolean().optional(),
   direction: z.enum(["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT"]),
   exitTrigger: z.enum(["MACD", "NONE"]).default("MACD")
 }).refine((value) => value.macdFastPeriod < value.macdSlowPeriod, {
@@ -331,6 +395,7 @@ const macdTrendStrategyConfigSchema = z.object({
 });
 
 const macdMomentumStrategyConfigSchema = z.object({
+  ...levelFilterFields,
   type: z.literal("MACD_MOMENTUM"),
   macdFastPeriod: z.number().int().positive().default(12),
   macdSlowPeriod: z.number().int().positive().default(26),
@@ -346,6 +411,8 @@ const macdMomentumStrategyConfigSchema = z.object({
   volumeMaPeriod: z.number().int().positive(),
   volumeMultiplier: z.number().positive(),
   volumeFilterEnabled: z.boolean().default(false),
+  lossCooldownBars: lossCooldownBarsSchema,
+  resumeEntryAfterCooldown: z.boolean().optional(),
   direction: z.enum(["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT"]),
   exitTrigger: z.enum(["MACD_MOMENTUM", "NONE"]).default("MACD_MOMENTUM")
 }).refine((value) => value.macdFastPeriod < value.macdSlowPeriod, {
@@ -356,6 +423,10 @@ const macdMomentumStrategyConfigSchema = z.object({
 export const backtestConfigSchema = z.object({
   symbol: z.enum(supportedSymbols),
   timeframe: z.enum(supportedTimeframes),
+  dailyCandleStartHour: z.custom<DailyCandleStartHour>(
+    (hour) => dailyCandleStartHours.some((allowed) => allowed === hour),
+    "Daily candle start hour must be 0, 4, 8, 12, 16 or 20"
+  ).optional(),
   startTime: z.string().datetime(),
   endTime: z.string().datetime(),
   initialCapital: z.number().positive(),
@@ -365,4 +436,7 @@ export const backtestConfigSchema = z.object({
 }).refine((value) => Date.parse(value.startTime) < Date.parse(value.endTime), {
   message: "startTime must be before endTime",
   path: ["startTime"]
+}).refine((value) => value.dailyCandleStartHour === undefined || supportsDailyCandleStart(value.symbol, value.timeframe), {
+  message: "Daily candle start hour is available for crypto daily backtests",
+  path: ["dailyCandleStartHour"]
 });

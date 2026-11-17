@@ -43,6 +43,14 @@ function signals(closes: number[], options: MacdMomentumStrategyConfig = config)
 }
 
 describe("MACD histogram momentum reversal signals", () => {
+  it("requires the current histogram slope to confirm the deferred direction", () => {
+    const bars = candles([10, 10, 10, 9, 10, 10, 13, 13, 11]);
+    const strategy = new MacdMomentumStrategy(bars, config);
+    expect(strategy.revalidateEntry(6, "BUY")).toMatchObject({ type: "BUY" });
+    expect(strategy.revalidateEntry(7, "BUY")).toBeNull();
+    expect(strategy.revalidateEntry(7, "SELL_SHORT")).toMatchObject({ type: "SELL_SHORT" });
+    expect(strategy.revalidateEntry(8, "SELL_SHORT")).toBeNull();
+  });
   it("buys and sells when positive histogram bars switch between hollow and solid", () => {
     const result = signals([10, 10, 10, 9, 10, 10, 13, 13, 11]);
 

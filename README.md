@@ -53,7 +53,11 @@ prisma/
 
 ## MVP Strategy
 
-Trend indicators: `MA` (simple moving average), `EMA`, or a separate `MACD_TREND` strategy. MA/EMA signals use closing-price crossings of the selected average, including reverse exits and position flips. Legacy configs default to EMA. For storage compatibility, `trendEmaPeriod`, `trendEma`, and the `EMA` exit-trigger value retain their names; `trendMaType` determines the actual average used.
+Crypto daily backtests offer a **Daily candle start (UTC+8)** setting for 00:00, 04:00, 08:00, 12:00, 16:00, or 20:00. The form defaults to 00:00. Date inputs use Beijing calendar dates, with the end date excluded. The API uses absolute UTC timestamps and accepts an optional `dailyCandleStartHour`. API requests and saved daily runs without an explicit hour use 08:00.
+
+The optional **Support / resistance filter** applies to MA, EMA, and both MACD strategies, including cooldown rechecks. It uses the same confirmed swing zones as the level scanner, from up to 120 completed bars on the selected timeframe before the signal bar. Long entries require clearance to the next resistance and short entries require clearance to the next support, measured from the signal price to the near edge of the zone. The default clearance is 1 ATR(14). An enabled filter waits for ATR warmup, and a clear side permits the entry. Reverse exits follow the strategy's exit setting. Enable with `levelFilterEnabled` and set `levelMinClearanceAtr` to adjust the threshold.
+
+The backtest form opens with BTC, `MA` (simple moving average), and **Candle close crossover** selected. `CLOSE_CROSS` compares each close with its corresponding average and uses the signal bar's indicators and closing price for execution. `INTRABAR_TOUCH` uses the average and entry filters from the last completed bar. A directional touch fills at the average, or at the open if price gaps to the other side. Historical OHLC supports one moving-average signal per bar. An intrabar fill is recorded against that bar's close timestamp because the exact touch time is unavailable. Select the mode under **Signal trigger** or set `trendTriggerMode` in the strategy config. The API defaults to `INTRABAR_TOUCH` when the strategy config omits `trendTriggerMode`. Legacy configs default to EMA. For storage compatibility, `trendMaType` determines the average used with `trendEmaPeriod`, `trendEma`, and the `EMA` exit-trigger value.
 
 The MACD strategy uses the MACD line (fast EMA minus slow EMA) crossing its signal EMA on completed bars. Defaults are 12/26/9. A golden cross opens long and a death cross opens short; direction settings can restrict entries. With `exitTrigger = MACD`, the opposite cross closes or flips the current position. Optional `zeroFilterEnabled` applies only to entries: `abs(MACD line) / close * 100` must be at most `zeroProximityPct` (default 0.5%). Reverse exits still fire when the filter blocks a new entry. ATR stops, ADX, and volume filters work as they do for the MA/EMA strategy. The MACD line, signal, and histogram are saved with each chart point and shown below the price chart.
 
@@ -144,6 +148,8 @@ Timeframes:
 - `1h`
 - `2h`
 - `4h`
+- `8h`
+- `12h`
 - `1d`
 - `1w`
 
@@ -164,8 +170,8 @@ Strategy:
 
 Rules:
 
-- Close crosses above trend EMA -> open long, or close short in `SHORT_ONLY`
-- Close crosses below trend EMA -> open short, or close long in `LONG_ONLY`
+- An upward MA/EMA signal opens long, or closes short in `SHORT_ONLY`.
+- A downward MA/EMA signal opens short, or closes long in `LONG_ONLY`.
 - With `exitTrigger = EMA`, a reverse EMA signal closes the existing position and opens the new opposite position
 - With `exitTrigger = NONE`, reverse EMA signals do not close an existing position
 - EMA exits do not require ATR, ADX, or volume filters to be enabled or warmed up
@@ -263,13 +269,13 @@ Strategy configs, Wyckoff results, jobs, and checkpoints are stored as serialize
 
 ## Local Setup
 
+安装 Node.js 和 pnpm 后，在项目根目录运行：
+
 ```bash
-pnpm install
-cp .env.example .env
-pnpm prisma:generate
-pnpm exec prisma migrate deploy
-pnpm dev
+pnpm start
 ```
+
+首次运行时会按锁文件安装依赖，并在缺少 `.env` 时从模板创建。命令会生成 Prisma Client、应用数据库迁移，然后同时启动 Web 和 API。终端按 `Ctrl+C` 停止服务。
 
 Web:
 

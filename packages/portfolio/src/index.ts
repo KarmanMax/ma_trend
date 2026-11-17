@@ -34,7 +34,7 @@ export interface Portfolio {
   getOpenPosition(): Position | null;
   getTrades(): Trade[];
   getEquityCurve(): EquityPoint[];
-  onFill(fill: Fill): void;
+  onFill(fill: Fill): Trade | void;
   markToMarket(candle: Candle): PortfolioSnapshot;
 }
 
@@ -64,7 +64,7 @@ export class SimulatedPortfolio implements Portfolio {
     return this.equityCurve.map((point) => ({ ...point }));
   }
 
-  onFill(fill: Fill): void {
+  onFill(fill: Fill): Trade | void {
     if (fill.type === "OPEN_LONG" || fill.type === "OPEN_SHORT") {
       if (this.position) {
         return;
@@ -107,17 +107,17 @@ export class SimulatedPortfolio implements Portfolio {
         ? (this.position.entryPrice - closeFill.price) * quantity
         : (closeFill.price - this.position.entryPrice) * quantity;
     const netPnl = grossPnl - this.position.accumulatedFee - closeFill.fee;
-    const openTrade = [...this.trades].reverse().find((trade) => trade.exitTime === undefined);
-    if (openTrade) {
+    const openTrade = this.trades.at(-1);
+    this.position = null;
+    if (openTrade && openTrade.exitTime === undefined) {
       openTrade.exitTime = closeFill.time;
       openTrade.exitPrice = closeFill.price;
       openTrade.grossPnl = grossPnl;
       openTrade.netPnl = netPnl;
       openTrade.fee += closeFill.fee;
       openTrade.exitReason = closeFill.reason;
+      return { ...openTrade };
     }
-
-    this.position = null;
   }
 
   markToMarket(candle: Candle): PortfolioSnapshot {
@@ -129,7 +129,9 @@ export class SimulatedPortfolio implements Portfolio {
     const equity = this.cash + positionValue;
     const point = { time: candle.closeTime, equity };
 
-    if (this.equityCurve.at(-1)?.time !== point.time) {
+    if (this.equityCurve.at(-1)?.time === point.time) {
+      this.equityCurve[this.equityCurve.length - 1] = point;
+    } else {
       this.equityCurve.push(point);
     }
 

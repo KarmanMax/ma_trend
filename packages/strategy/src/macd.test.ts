@@ -22,6 +22,14 @@ function signal(index: number, options: MacdTrendStrategyConfig = config) {
 }
 
 describe("MACD trend signals", () => {
+  it("rechecks the current MACD side and entry filters for a deferred signal", () => {
+    const strategy = new MacdTrendStrategy(candles, config);
+    expect(strategy.revalidateEntry(4, "BUY")).toMatchObject({ type: "BUY" });
+    expect(strategy.revalidateEntry(5, "BUY")).toBeNull();
+    expect(strategy.revalidateEntry(5, "SELL_SHORT")).toMatchObject({ type: "SELL_SHORT" });
+    expect(new MacdTrendStrategy(candles, { ...config, zeroFilterEnabled: true, zeroProximityPct: 0 })
+      .revalidateEntry(4, "BUY")).toBeNull();
+  });
   it("waits for the signal line, then trades golden and death crosses", () => {
     expect(signal(2).type).toBe("HOLD");
     expect(signal(4)).toMatchObject({ type: "BUY", allowPositionFlip: true });

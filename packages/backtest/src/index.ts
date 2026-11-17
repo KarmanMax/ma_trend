@@ -1,8 +1,8 @@
 import { SimulatedExecutionEngine, type ExecutionEngine } from "@trend-trade/execution";
-import { adx, atr, calculateDrawdownCurve, calculateMetrics, ema, macd, sma } from "@trend-trade/indicator";
+import { adx, atr, calculateDrawdownCurve, calculateMetrics, ema, macd, priceZoneLookbackBars, sma } from "@trend-trade/indicator";
 import type { MarketDataProvider } from "@trend-trade/market-data";
 import { SimulatedPortfolio, type Portfolio } from "@trend-trade/portfolio";
-import type { BacktestChartPoint, BacktestConfig, BacktestResult, Candle, EmaTrendStrategyConfig, MacdMomentumStrategyConfig, MacdTrendStrategyConfig, Signal } from "@trend-trade/shared";
+import { timeframeMilliseconds, type BacktestChartPoint, type BacktestConfig, type BacktestResult, type Candle, type EmaTrendStrategyConfig, type MacdMomentumStrategyConfig, type MacdTrendStrategyConfig, type Signal } from "@trend-trade/shared";
 import { createDefaultStrategyRegistry, createStrategyConfigKey, IncrementalStrategyRunner, type StrategyFactory } from "@trend-trade/strategy";
 
 export * from "./incremental";
@@ -19,26 +19,47 @@ export class BacktestEngine {
       new SimulatedExecutionEngine({
         feeRate: config.feeRate,
         slippageRate: config.slippageRate,
+        lossCooldownBars: config.strategy.lossCooldownBars,
+        keepCooldownSignalsByDirection: config.strategy.type === "EMA_TREND"
+          && config.strategy.trendTriggerMode !== "CLOSE_CROSS"
+          && config.strategy.keepCooldownSignalsByDirection,
         positionSizing: "ALL_IN"
       }),
     private readonly strategyFactoryProvider: StrategyFactoryProvider = (candles) => createDefaultStrategyRegistry(candles)
   ) {}
 
   async run(config: BacktestConfig): Promise<BacktestResult> {
-    const candles = await this.marketDataProvider.getCandles({
+    const rangeStart = Date.parse(config.startTime);
+    const rangeEnd = Date.parse(config.endTime);
+    const requiresClosedBar = config.strategy.type === "EMA_TREND"
+      || config.strategy.levelFilterEnabled || config.dailyCandleStartHour !== undefined || config.timeframe === "8h" || config.timeframe === "12h";
+    const lastClose = Math.min(rangeEnd, Date.now());
+    const candles = (await this.marketDataProvider.getCandles({
       symbol: config.symbol,
       timeframe: config.timeframe,
-      startTime: Date.parse(config.startTime),
-      endTime: Date.parse(config.endTime)
-    });
+      dailyCandleStartHour: config.dailyCandleStartHour,
+      startTime: calculateWarmupStart(config, rangeStart),
+      requiredStartTime: rangeStart,
+      endTime: rangeEnd
+    }))
+      .filter((candle) => candle.openTime <= rangeEnd && (!requiresClosedBar || candle.closeTime <= lastClose))
+      .sort((left, right) => left.openTime - right.openTime)
+      .filter((candle, index, values) => index === 0 || candle.openTime !== values[index - 1].openTime);
 
     if (candles.length === 0) {
+      throw new Error("No candles returned for the requested range");
+    }
+
+    const rangeCandles = candles.filter((candle) => candle.openTime >= rangeStart && candle.openTime <= rangeEnd);
+    if (rangeCandles.length === 0) {
       throw new Error("No candles returned for the requested range");
     }
 
     const portfolio = this.portfolioFactory(config.initialCapital);
     const executionEngine = this.executionEngineFactory(config);
     const strategy = this.strategyFactoryProvider(candles).create(config.strategy);
+    const revalidateEntry = config.strategy.resumeEntryAfterCooldown && config.strategy.lossCooldownBars
+      && "revalidateEntry" in strategy ? strategy.revalidateEntry?.bind(strategy) : undefined;
     const runner = "onClosedBar" in strategy
       ? new IncrementalStrategyRunner(strategy, {
           strategyType: config.strategy.type,
@@ -48,7 +69,7 @@ export class BacktestEngine {
         })
       : null;
     const replayCandles = runner
-      ? candles.filter((candle) => candle.closeTime <= Date.parse(config.endTime)).sort((left, right) => left.closeTime - right.closeTime)
+      ? candles.filter((candle) => candle.closeTime <= rangeEnd).sort((left, right) => left.closeTime - right.closeTime)
       : candles;
     if (replayCandles.length === 0) {
       throw new Error("No closed candles returned for the requested range");
@@ -69,7 +90,13 @@ export class BacktestEngine {
       } else {
         throw new Error("Strategy does not support historical or incremental execution");
       }
-      executionEngine.execute({ candle, signal, portfolio });
+      if (candle.openTime < rangeStart) {
+        continue;
+      }
+      executionEngine.execute({
+        candle, signal, portfolio,
+        revalidateEntry: revalidateEntry ? (type) => revalidateEntry(index, type) : undefined
+      });
       portfolio.markToMarket(candle);
       processedCandles.push(candle);
     }
@@ -89,8 +116,9 @@ export class BacktestEngine {
       timeframe: config.timeframe
     });
     const chartPoints = runner ? createBaseChartPoints(processedCandles)
-      : config.strategy.type === "MACD_TREND" || config.strategy.type === "MACD_MOMENTUM" ? createMacdChartPoints(processedCandles, config.strategy)
-      : createTrendChartPoints(processedCandles, config.strategy);
+      : config.strategy.type === "MACD_TREND" || config.strategy.type === "MACD_MOMENTUM"
+        ? createMacdChartPoints(candles, config.strategy).filter((_, index) => candles[index].openTime >= rangeStart)
+        : createTrendChartPoints(candles, config.strategy).filter((_, index) => candles[index].openTime >= rangeStart);
 
     return {
       config,
@@ -102,6 +130,26 @@ export class BacktestEngine {
       trades
     };
   }
+}
+
+function calculateWarmupStart(config: BacktestConfig, rangeStart: number): number {
+  const strategyPeriod = config.strategy.type === "EMA_TREND"
+    ? config.strategy.trendEmaPeriod
+    : config.strategy.macdSlowPeriod + config.strategy.macdSignalPeriod;
+  const longestPeriod = Math.max(
+    strategyPeriod,
+    config.strategy.atrPeriod,
+    config.strategy.adxPeriod * 2,
+    config.strategy.volumeMaPeriod,
+    config.strategy.levelFilterEnabled ? priceZoneLookbackBars : 0
+  );
+  // The multiplier covers EMA convergence as well as weekends and closed-market hours.
+  // A one-week minimum ensures short intraday periods can still reach prior sessions.
+  const lookback = Math.max(
+    longestPeriod * timeframeMilliseconds[config.timeframe] * 10,
+    timeframeMilliseconds["1w"]
+  );
+  return Math.max(0, rangeStart - lookback);
 }
 
 function createBaseChartPoints(candles: Candle[]): BacktestChartPoint[] {

@@ -56,6 +56,7 @@ app.get("/api/backtests", async (_request, response, next) => {
         id: run.id,
         symbol: run.symbol,
         timeframe: run.timeframe,
+        dailyCandleStartHour: run.dailyCandleStartHour,
         strategyType: run.strategyType,
         status: run.status,
         totalReturn: run.metrics?.totalReturn ?? null,
@@ -94,6 +95,7 @@ app.get("/api/backtests/:id", async (request, response, next) => {
       config: {
         symbol: run.symbol,
         timeframe: run.timeframe,
+        dailyCandleStartHour: run.dailyCandleStartHour ?? undefined,
         startTime: run.startTime.toISOString(),
         endTime: run.endTime.toISOString(),
         initialCapital: run.initialCapital,
@@ -172,6 +174,7 @@ async function saveBacktestResult(config: BacktestConfig, result: BacktestResult
     data: {
       symbol: config.symbol,
       timeframe: config.timeframe,
+      dailyCandleStartHour: config.dailyCandleStartHour,
       strategyType: config.strategy.type,
       status: result.status,
       initialCapital: config.initialCapital,

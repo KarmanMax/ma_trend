@@ -1,5 +1,5 @@
-import { adx, atr, ema, macd, sma } from "@trend-trade/indicator";
-import type { Candle, EmaTrendStrategyConfig, MacdMomentumStrategyConfig, MacdTrendStrategyConfig, Signal, StrategyConfig } from "@trend-trade/shared";
+import { adx, atr, detectPriceZones, ema, macd, priceZoneLookbackBars, sma } from "@trend-trade/indicator";
+import { defaultLevelMinClearanceAtr, type Candle, type EmaTrendStrategyConfig, type EntrySignalType, type MacdMomentumStrategyConfig, type MacdTrendStrategyConfig, type Signal, type StrategyConfig } from "@trend-trade/shared";
 import type { IncrementalStrategySession } from "./incremental";
 
 export * from "./incremental";
@@ -15,6 +15,7 @@ export interface Strategy<TConfig extends StrategyConfig = StrategyConfig> {
   id: string;
   name: string;
   generateSignal(context: StrategyContext<TConfig>): Signal;
+  revalidateEntry?(index: number, type: EntrySignalType): Signal | null;
 }
 
 export type StrategyImplementation = Strategy<StrategyConfig> | IncrementalStrategySession;
@@ -65,80 +66,123 @@ export class EmaTrendStrategy implements Strategy<EmaTrendStrategyConfig> {
     const previousCandle = this.candles[index - 1];
     const currentCandle = this.candles[index];
     const previousTrendEma = this.trendEmaSeries[index - 1];
-    const currentTrendEma = this.trendEmaSeries[index];
-    const currentAtr = this.atrSeries[index];
-    const currentAdx = this.adxSeries[index];
-    const currentVolumeMa = this.volumeMaSeries[index];
-
-    if ([previousTrendEma, currentTrendEma].some((value) => value === null)) {
+    if (previousTrendEma == null) {
       return { type: "HOLD", reason: "Waiting for indicator warmup" };
     }
 
-    const crossedUp = previousCandle.close <= previousTrendEma! && currentCandle.close > currentTrendEma!;
-    const crossedDown = previousCandle.close >= previousTrendEma! && currentCandle.close < currentTrendEma!;
+    const averageName = `${this.config.trendMaType ?? "EMA"}${this.config.trendEmaPeriod}`;
+    if (this.config.trendTriggerMode === "CLOSE_CROSS") {
+      const currentTrendEma = this.trendEmaSeries[index];
+      if (currentTrendEma == null) {
+        return { type: "HOLD", reason: "Waiting for indicator warmup" };
+      }
+      const crossedUp = previousCandle.close <= previousTrendEma && currentCandle.close > currentTrendEma;
+      const crossedDown = previousCandle.close >= previousTrendEma && currentCandle.close < currentTrendEma;
+      if (!crossedUp && !crossedDown) {
+        return { type: "HOLD", reason: "No trend moving average cross" };
+      }
+      return this.signalForCross(
+        crossedUp ? "BUY" : "SELL_SHORT", index, `Close crossed ${crossedUp ? "above" : "below"} ${averageName}`
+      );
+    }
+
+    const touch = movingAverageTouch(previousCandle.close, currentCandle, previousTrendEma);
+    if (!touch) {
+      return { type: "HOLD", reason: "No directional moving average touch" };
+    }
+    return this.signalForCross(
+      touch.type, index, `Price reached ${averageName} from ${touch.type === "BUY" ? "below" : "above"}`, touch.trigger
+    );
+  }
+
+  private signalForCross(type: EntrySignalType, index: number, reason: string, trigger?: Signal["trigger"]): Signal {
+    const crossedUp = type === "BUY";
+    const exitEnabled = this.config.exitTrigger === "EMA";
+    const closeType = crossedUp ? "CLOSE_SHORT" : "CLOSE_LONG";
+    const triggerFields = trigger ? { trigger } : {};
+    const directionExcluded = crossedUp ? this.config.direction === "SHORT_ONLY" : this.config.direction === "LONG_ONLY";
+    if (directionExcluded) {
+      return exitEnabled ? { type: closeType, reason, ...triggerFields } : { type: "HOLD", reason: "EMA exit trigger disabled" };
+    }
+
+    const indicatorIndex = trigger ? index - 1 : index;
+    const candle = this.candles[indicatorIndex];
+    const referencePrice = trigger?.price ?? candle.close;
+    const currentAtr = this.atrSeries[indicatorIndex];
+    const filterFailure = entryFilterFailure(
+      this.config, currentAtr, this.adxSeries[indicatorIndex], this.volumeMaSeries[indicatorIndex], candle
+    ) ?? levelEntryFilterFailure(this.config, this.candles, index, type, referencePrice);
+    if (filterFailure) {
+      return exitEnabled ? { type: closeType, reason: `${reason}; ${filterFailure}`, ...triggerFields } : { type: "HOLD", reason: filterFailure };
+    }
+
+    const signal = { ...entrySignal(this.config, referencePrice, currentAtr, type, reason), ...triggerFields };
+    if (trigger && this.config.exitOnFailedBreakout) {
+      signal.entryInvalidationLevel = this.trendEmaSeries[indicatorIndex]!;
+    }
+    return signal;
+  }
+
+  revalidateEntry(index: number, type: EntrySignalType): Signal | null {
     const candle = this.candles[index];
-
-    if (crossedUp) {
-      if (this.config.direction === "SHORT_ONLY") {
-        return this.config.exitTrigger === "EMA"
-          ? {
-              type: "CLOSE_SHORT",
-              reason: `Close crossed above ${this.config.trendMaType ?? "EMA"}${this.config.trendEmaPeriod}`
-            }
-          : { type: "HOLD", reason: "EMA exit trigger disabled" };
-      }
-
-      if (this.config.direction !== "LONG_SHORT" || this.config.exitTrigger !== "EMA") {
-        const entryFilterFailure = this.getEntryFilterFailure(currentAtr, currentAdx, currentVolumeMa, candle);
-        if (entryFilterFailure) {
-          return { type: "HOLD", reason: entryFilterFailure };
-        }
-      }
-
-      return {
-        type: "BUY",
-        reason: `Close crossed above ${this.config.trendMaType ?? "EMA"}${this.config.trendEmaPeriod}`,
-        stopPrice: this.config.atrStopEnabled && currentAtr !== null ? candle.close - currentAtr * this.config.atrMultiplier : undefined,
-        allowPositionFlip: this.config.exitTrigger === "EMA"
-      };
+    const average = this.trendEmaSeries[index];
+    if (average == null || !isEntryDirectionValid(type, candle.close - average, this.config)) {
+      return null;
     }
-
-    if (crossedDown) {
-      if (this.config.direction === "LONG_ONLY") {
-        return this.config.exitTrigger === "EMA"
-          ? {
-              type: "CLOSE_LONG",
-              reason: `Close crossed below ${this.config.trendMaType ?? "EMA"}${this.config.trendEmaPeriod}`
-            }
-          : { type: "HOLD", reason: "EMA exit trigger disabled" };
-      }
-
-      if (this.config.direction !== "LONG_SHORT" || this.config.exitTrigger !== "EMA") {
-        const entryFilterFailure = this.getEntryFilterFailure(currentAtr, currentAdx, currentVolumeMa, candle);
-        if (entryFilterFailure) {
-          return { type: "HOLD", reason: entryFilterFailure };
-        }
-      }
-
-      return {
-        type: "SELL_SHORT",
-        reason: `Close crossed below ${this.config.trendMaType ?? "EMA"}${this.config.trendEmaPeriod}`,
-        stopPrice: this.config.atrStopEnabled && currentAtr !== null ? candle.close + currentAtr * this.config.atrMultiplier : undefined,
-        allowPositionFlip: this.config.exitTrigger === "EMA"
-      };
+    const currentAtr = this.atrSeries[index];
+    if (entryFilterFailure(this.config, currentAtr, this.adxSeries[index], this.volumeMaSeries[index], candle)
+      || levelEntryFilterFailure(this.config, this.candles, index, type, candle.close)) {
+      return null;
     }
-
-    return { type: "HOLD", reason: "No trend moving average cross" };
+    if (this.config.filterExtendedCooldownEntries && currentAtr != null && currentAtr > 0) {
+      const momentumBase = this.candles[index - 20]?.close;
+      if (momentumBase !== undefined
+        && isEntryDirectionValid(type, candle.close - momentumBase, this.config)
+        && Math.abs(candle.close - average) >= 2 * currentAtr) {
+        return null;
+      }
+    }
+    return entrySignal(this.config, candle.close, currentAtr, type, "Moving average entry confirmed after cooldown");
   }
+}
 
-  private getEntryFilterFailure(
-    currentAtr: number | null,
-    currentAdx: number | null,
-    currentVolumeMa: number | null,
-    candle: Candle
-  ): string | null {
-    return entryFilterFailure(this.config, currentAtr, currentAdx, currentVolumeMa, candle);
+function movingAverageTouch(previousClose: number, candle: Candle, average: number): {
+  type: EntrySignalType;
+  trigger: NonNullable<Signal["trigger"]>;
+} | null {
+  // If the prior close and the open both equal the level, OHLC can establish
+  // direction only when price moves to one side of the level.
+  const startsOnLevel = previousClose === average && candle.open === average;
+  const upward = startsOnLevel
+    ? candle.high > average && candle.low === average
+    : previousClose < average || (previousClose === average && candle.open > average);
+  const downward = startsOnLevel
+    ? candle.low < average && candle.high === average
+    : previousClose > average || (previousClose === average && candle.open < average);
+  if (upward && candle.high >= average) {
+    return { type: "BUY", trigger: !startsOnLevel && candle.open >= average ? { price: candle.open, at: "OPEN" } : { price: average, at: "INTRABAR" } };
   }
+  if (downward && candle.low <= average) {
+    return { type: "SELL_SHORT", trigger: !startsOnLevel && candle.open <= average ? { price: candle.open, at: "OPEN" } : { price: average, at: "INTRABAR" } };
+  }
+  return null;
+}
+
+function isEntryDirectionValid(type: EntrySignalType, signedStrength: number, config: StrategyConfig): boolean {
+  return type === "BUY"
+    ? config.direction !== "SHORT_ONLY" && signedStrength > 0
+    : config.direction !== "LONG_ONLY" && signedStrength < 0;
+}
+
+function entrySignal(config: StrategyConfig, referencePrice: number, currentAtr: number | null, type: EntrySignalType, reason: string): Signal {
+  return {
+    type,
+    reason,
+    stopPrice: config.atrStopEnabled && currentAtr !== null
+      ? referencePrice + (type === "BUY" ? -1 : 1) * currentAtr * config.atrMultiplier
+      : undefined,
+    allowPositionFlip: config.exitTrigger !== "NONE"
+  };
 }
 
 function entryFilterFailure(
@@ -171,6 +215,37 @@ function entryFilterFailure(
   }
 
   return null;
+}
+
+function macdEntryFilterFailure(
+  config: MacdTrendStrategyConfig | MacdMomentumStrategyConfig,
+  currentLine: number,
+  currentAtr: number | null,
+  currentAdx: number | null,
+  currentVolumeMa: number | null,
+  candle: Candle
+): string | null {
+  const nearZero = Math.abs(currentLine) / candle.close * 100 <= config.zeroProximityPct;
+  if (config.zeroFilterEnabled && !nearZero) {
+    return `MACD line is farther than ${config.zeroProximityPct}% of price from zero`;
+  }
+  return entryFilterFailure(config, currentAtr, currentAdx, currentVolumeMa, candle);
+}
+
+function levelEntryFilterFailure(
+  config: StrategyConfig, candles: Candle[], index: number, type: EntrySignalType, referencePrice: number
+): string | null {
+  if (!config.levelFilterEnabled) return null;
+
+  // Freeze the zones before the signal bar, including for fills triggered intrabar.
+  const snapshot = detectPriceZones(candles.slice(Math.max(0, index - priceZoneLookbackBars), index));
+  if (!snapshot) return "Waiting for support/resistance ATR warmup";
+  const minimumAtr = config.levelMinClearanceAtr ?? defaultLevelMinClearanceAtr;
+  const minimumDistance = snapshot.atr * minimumAtr;
+  const obstacle = snapshot.zones.some((zone) => type === "BUY"
+    ? zone.side === "resistance" && referencePrice <= zone.zoneHigh && zone.zoneLow - referencePrice < minimumDistance
+    : zone.side === "support" && referencePrice >= zone.zoneLow && referencePrice - zone.zoneHigh < minimumDistance);
+  return obstacle ? `${type === "BUY" ? "Resistance" : "Support"} zone within ${minimumAtr} ATR of entry` : null;
 }
 
 export class MacdTrendStrategy implements Strategy<MacdTrendStrategyConfig> {
@@ -212,23 +287,30 @@ export class MacdTrendStrategy implements Strategy<MacdTrendStrategyConfig> {
     }
 
     const candle = this.candles[index];
-    const nearZero = Math.abs(currentLine) / candle.close * 100 <= this.config.zeroProximityPct;
-    const filterFailure = this.config.zeroFilterEnabled && !nearZero
-      ? `MACD line is farther than ${this.config.zeroProximityPct}% of price from zero`
-      : entryFilterFailure(this.config, this.atrSeries[index], this.adxSeries[index], this.volumeMaSeries[index], candle);
+    const currentAtr = this.atrSeries[index];
+    const type = crossedUp ? "BUY" : "SELL_SHORT";
+    const filterFailure = macdEntryFilterFailure(this.config, currentLine, currentAtr, this.adxSeries[index], this.volumeMaSeries[index], candle)
+      ?? levelEntryFilterFailure(this.config, this.candles, index, type, candle.close);
     if (filterFailure) {
       return exitEnabled ? { type: closeType, reason: `${reason}; ${filterFailure}` } : { type: "HOLD", reason: filterFailure };
     }
 
+    return entrySignal(this.config, candle.close, currentAtr, type, reason);
+  }
+
+  revalidateEntry(index: number, type: EntrySignalType): Signal | null {
+    const line = this.macdSeries.line[index];
+    const histogram = this.macdSeries.histogram[index];
+    if (line == null || histogram == null || !isEntryDirectionValid(type, histogram, this.config)) {
+      return null;
+    }
+    const candle = this.candles[index];
     const currentAtr = this.atrSeries[index];
-    return {
-      type: crossedUp ? "BUY" : "SELL_SHORT",
-      reason,
-      stopPrice: this.config.atrStopEnabled && currentAtr !== null
-        ? candle.close + (crossedUp ? -1 : 1) * currentAtr * this.config.atrMultiplier
-        : undefined,
-      allowPositionFlip: exitEnabled
-    };
+    if (macdEntryFilterFailure(this.config, line, currentAtr, this.adxSeries[index], this.volumeMaSeries[index], candle)
+      || levelEntryFilterFailure(this.config, this.candles, index, type, candle.close)) {
+      return null;
+    }
+    return entrySignal(this.config, candle.close, currentAtr, type, "MACD entry confirmed after cooldown");
   }
 }
 
@@ -276,23 +358,32 @@ export class MacdMomentumStrategy implements Strategy<MacdMomentumStrategyConfig
     }
 
     const candle = this.candles[index];
-    const nearZero = Math.abs(currentLine) / candle.close * 100 <= this.config.zeroProximityPct;
-    const filterFailure = this.config.zeroFilterEnabled && !nearZero
-      ? `MACD line is farther than ${this.config.zeroProximityPct}% of price from zero`
-      : entryFilterFailure(this.config, this.atrSeries[index], this.adxSeries[index], this.volumeMaSeries[index], candle);
+    const currentAtr = this.atrSeries[index];
+    const type = turnedUp ? "BUY" : "SELL_SHORT";
+    const filterFailure = macdEntryFilterFailure(this.config, currentLine, currentAtr, this.adxSeries[index], this.volumeMaSeries[index], candle)
+      ?? levelEntryFilterFailure(this.config, this.candles, index, type, candle.close);
     if (filterFailure) {
       return exitEnabled ? { type: closeType, reason: `${reason}; ${filterFailure}` } : { type: "HOLD", reason: filterFailure };
     }
 
+    return entrySignal(this.config, candle.close, currentAtr, type, reason);
+  }
+
+  revalidateEntry(index: number, type: EntrySignalType): Signal | null {
+    const line = this.macdSeries.line[index];
+    const previous = this.macdSeries.histogram[index - 1];
+    const current = this.macdSeries.histogram[index];
+    if (line == null || previous == null || current == null || Math.sign(previous) !== Math.sign(current)
+      || !isEntryDirectionValid(type, current - previous, this.config)) {
+      return null;
+    }
+    const candle = this.candles[index];
     const currentAtr = this.atrSeries[index];
-    return {
-      type: turnedUp ? "BUY" : "SELL_SHORT",
-      reason,
-      stopPrice: this.config.atrStopEnabled && currentAtr !== null
-        ? candle.close + (turnedUp ? -1 : 1) * currentAtr * this.config.atrMultiplier
-        : undefined,
-      allowPositionFlip: exitEnabled
-    };
+    if (macdEntryFilterFailure(this.config, line, currentAtr, this.adxSeries[index], this.volumeMaSeries[index], candle)
+      || levelEntryFilterFailure(this.config, this.candles, index, type, candle.close)) {
+      return null;
+    }
+    return entrySignal(this.config, candle.close, currentAtr, type, "MACD momentum entry confirmed after cooldown");
   }
 }
 

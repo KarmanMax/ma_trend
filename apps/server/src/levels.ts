@@ -1,13 +1,15 @@
-import { atr } from "@trend-trade/indicator";
+import { findNearbyLevels, priceZoneLookbackBars, type LevelSide } from "@trend-trade/indicator";
 import { BinanceMarketDataProvider, BinanceSpotDailyProvider, CoinGeckoTop300Provider, RoutedMarketDataProvider } from "@trend-trade/market-data";
 import type { CryptoAsset } from "@trend-trade/market-data";
 import type { Candle, SymbolCode, Timeframe } from "@trend-trade/shared";
 import { Router } from "express";
 import { z } from "zod";
 
+export { findNearbyLevels };
+export type { LevelSide };
+
 export const levelTimeframes = ["1h", "4h", "1d", "1w"] as const;
 export type LevelTimeframe = (typeof levelTimeframes)[number];
-export type LevelSide = "support" | "resistance";
 export type Market = "crypto" | "us";
 
 type ScanAsset = { symbol: string; name: string; market: Market; pair?: string; marketCapRank?: number };
@@ -185,7 +187,7 @@ levelsRouter.get("/scan", async (request, response, next) => {
         const asset = universe[nextIndex++];
         try {
           const candles = await getAssetCandles(asset, query.timeframe, now - lookbackDays[query.timeframe] * 86_400_000, now);
-          const completed = candles.filter((candle) => candle.closeTime < now).sort((a, b) => a.openTime - b.openTime).slice(-120);
+          const completed = candles.filter((candle) => candle.closeTime < now).sort((a, b) => a.openTime - b.openTime).slice(-priceZoneLookbackBars);
           if (completed.length < 30) {
             unavailable.push({ symbol: asset.symbol, reason: `Only ${completed.length} completed bars (30 required)` });
             continue;
@@ -207,150 +209,3 @@ levelsRouter.get("/scan", async (request, response, next) => {
     next(error);
   }
 });
-
-type LevelMatch = Pick<ScanMatch, "side" | "price" | "level" | "zoneLow" | "zoneHigh" | "distancePct" | "touches" | "levelTime" | "priceTime">;
-type Pivot = { price: number; time: number; index: number };
-type Touch = { price: number; time: number };
-type PriceZone = { level: number; zoneLow: number; zoneHigh: number; touches: number; time: number };
-
-const levelAtrPeriod = 14;
-const levelAtrHalfWidth = 0.25;
-
-/** A zone needs two independent five-bar swing touches in the latest 120 completed bars. */
-export function findNearbyLevels(candles: Candle[], proximityPct: number): LevelMatch[] {
-  const bars = candles.filter((bar) =>
-    Number.isFinite(bar.high) && Number.isFinite(bar.low) && Number.isFinite(bar.close) &&
-    bar.high > 0 && bar.low > 0 && bar.close > 0
-  ).slice(-120);
-  if (bars.length < levelAtrPeriod) return [];
-  const latest = bars[bars.length - 1];
-  const latestAtr = atr(bars, levelAtrPeriod).at(-1);
-  if (latestAtr === null || latestAtr === undefined || !Number.isFinite(latestAtr) || latestAtr <= 0) return [];
-  const halfWidth = latestAtr * levelAtrHalfWidth;
-  const matches: LevelMatch[] = [];
-
-  for (const side of ["support", "resistance"] as const) {
-    const pivots: Pivot[] = [];
-    for (let i = 2; i < bars.length - 2; i++) {
-      const price = side === "support" ? bars[i].low : bars[i].high;
-      const neighbors = [bars[i - 2], bars[i - 1], bars[i + 1], bars[i + 2]]
-        .map((bar) => side === "support" ? bar.low : bar.high);
-      const isPivot = side === "support"
-        ? neighbors.every((value) => price <= value) && neighbors.some((value) => price < value)
-        : neighbors.every((value) => price >= value) && neighbors.some((value) => price > value);
-      if (isPivot && Number.isFinite(price) && price > 0) pivots.push({ price, time: bars[i].closeTime, index: i });
-    }
-
-    const nearest = buildPriceZones(pivots, bars, side, halfWidth)
-      .filter((zone) => side === "support" ? latest.close >= zone.zoneLow : latest.close <= zone.zoneHigh)
-      .sort((a, b) => Math.abs(latest.close - a.level) - Math.abs(latest.close - b.level))[0];
-    if (!nearest) continue;
-    const distancePct = Math.abs(latest.close - nearest.level) / latest.close * 100;
-    if (distancePct <= proximityPct) {
-      matches.push({
-        side,
-        price: latest.close,
-        level: nearest.level,
-        zoneLow: nearest.zoneLow,
-        zoneHigh: nearest.zoneHigh,
-        distancePct,
-        touches: nearest.touches,
-        levelTime: nearest.time,
-        priceTime: latest.closeTime
-      });
-    }
-  }
-
-  return matches;
-}
-
-function buildPriceZones(pivots: Pivot[], bars: Candle[], side: LevelSide, halfWidth: number): PriceZone[] {
-  if (pivots.length < 2) return [];
-  const seeds = new Set<number>(pivots.map((pivot) => pivot.price));
-  for (let left = 0; left < pivots.length; left++) {
-    for (let right = left + 1; right < pivots.length; right++) {
-      if (Math.abs(pivots[left].price - pivots[right].price) <= halfWidth * 2) {
-        seeds.add((pivots[left].price + pivots[right].price) / 2);
-      }
-    }
-  }
-
-  const zones: PriceZone[] = [];
-  for (const seed of seeds) {
-    const zone = refinePriceZone(seed, pivots, bars, side, halfWidth);
-    if (!zone) continue;
-    const duplicateIndex = zones.findIndex((item) => Math.abs(item.level - zone.level) <= halfWidth * 1e-6);
-    if (duplicateIndex === -1) {
-      zones.push(zone);
-    } else if (zone.touches > zones[duplicateIndex].touches ||
-      (zone.touches === zones[duplicateIndex].touches && zone.time > zones[duplicateIndex].time)) {
-      zones[duplicateIndex] = zone;
-    }
-  }
-  return zones;
-}
-
-function refinePriceZone(seed: number, pivots: Pivot[], bars: Candle[], side: LevelSide, halfWidth: number): PriceZone | null {
-  let level = seed;
-  let touches: Touch[] = [];
-  for (let iteration = 0; iteration < 6; iteration++) {
-    const zoneLow = level - halfWidth;
-    const zoneHigh = level + halfWidth;
-    const members = pivots.filter((pivot) => pivot.price >= zoneLow && pivot.price <= zoneHigh);
-    touches = collapseTouchEpisodes(members, bars, side, zoneLow, zoneHigh);
-    if (touches.length < 2) return null;
-    const nextLevel = median(touches.map((touch) => touch.price));
-    if (Math.abs(nextLevel - level) <= Math.max(Number.EPSILON * Math.abs(level), 1e-12)) {
-      level = nextLevel;
-      break;
-    }
-    level = nextLevel;
-  }
-
-  const zoneLow = level - halfWidth;
-  const zoneHigh = level + halfWidth;
-  touches = collapseTouchEpisodes(
-    pivots.filter((pivot) => pivot.price >= zoneLow && pivot.price <= zoneHigh),
-    bars,
-    side,
-    zoneLow,
-    zoneHigh
-  );
-  if (touches.length < 2) return null;
-  const finalLevel = median(touches.map((touch) => touch.price));
-  return {
-    level: finalLevel,
-    zoneLow: finalLevel - halfWidth,
-    zoneHigh: finalLevel + halfWidth,
-    touches: touches.length,
-    time: Math.max(...touches.map((touch) => touch.time))
-  };
-}
-
-function collapseTouchEpisodes(pivots: Pivot[], bars: Candle[], side: LevelSide, zoneLow: number, zoneHigh: number): Touch[] {
-  const ordered = [...pivots].sort((a, b) => a.index - b.index);
-  if (ordered.length === 0) return [];
-  const groups: Pivot[][] = [[ordered[0]]];
-  for (let index = 1; index < ordered.length; index++) {
-    const previous = ordered[index - 1];
-    const current = ordered[index];
-    const leftZone = bars.slice(previous.index + 1, current.index).some((bar) =>
-      side === "support" ? bar.low > zoneHigh : bar.high < zoneLow
-    );
-    if (leftZone) groups.push([current]);
-    else groups[groups.length - 1].push(current);
-  }
-
-  return groups.map((group) => ({
-    price: side === "support"
-      ? Math.min(...group.map((pivot) => pivot.price))
-      : Math.max(...group.map((pivot) => pivot.price)),
-    time: Math.max(...group.map((pivot) => pivot.time))
-  }));
-}
-
-function median(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
-}

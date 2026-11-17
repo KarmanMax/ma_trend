@@ -1,11 +1,12 @@
-import type { BacktestConfig } from "@trend-trade/shared";
+import type { BacktestConfig, DailyCandleStartHour, SymbolCode, Timeframe } from "@trend-trade/shared";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
 
 export type ApiBacktestRun = {
   id: string;
-  symbol: string;
-  timeframe: string;
+  symbol: SymbolCode;
+  timeframe: Timeframe;
+  dailyCandleStartHour: DailyCandleStartHour | null;
   strategyType: string;
   status: string;
   totalReturn: number | null;

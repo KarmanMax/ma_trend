@@ -32,3 +32,7 @@ export function formatCurrency(value: number | null | undefined): string {
 export function formatDateTime(value: string | number): string {
   return new Date(value).toLocaleString();
 }
+
+export function formatDailyCandleStartHour(hour: number): string {
+  return `${String(hour).padStart(2, "0")}:00`;
+}

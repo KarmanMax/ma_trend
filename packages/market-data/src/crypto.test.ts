@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fetch } from "undici";
 import { BinanceSpotDailyProvider, CoinGeckoTop300Provider } from "./crypto";
+import { BinanceMarketDataProvider } from "./index";
 
 vi.mock("undici", () => ({ fetch: vi.fn(), ProxyAgent: class {} }));
 
@@ -13,6 +14,34 @@ function jsonResponse(value: unknown): Response {
 beforeEach(() => mockedFetch.mockReset());
 
 describe("dynamic crypto market data", () => {
+  it.each([[0, "8"], [4, "4"], [8, "0"], [12, "-4"], [16, "-8"], [20, "-12"], [undefined, null]] as const)(
+    "maps Beijing daily start %s to Binance offset %s without shifting query timestamps",
+    async (dailyCandleStartHour, timeZone) => {
+      mockedFetch.mockResolvedValueOnce(jsonResponse([]) as never);
+      const provider = new BinanceMarketDataProvider("https://example.test");
+      const startTime = Date.parse("2024-01-01T00:00:00Z");
+      const endTime = Date.parse("2024-01-02T00:00:00Z");
+      await provider.getCandles({ symbol: "BTC", timeframe: "1d", dailyCandleStartHour, startTime, endTime });
+
+      const params = new URL(String(mockedFetch.mock.calls[0][0])).searchParams;
+      expect(params.get("timeZone")).toBe(timeZone);
+      expect(params.get("startTime")).toBe(String(startTime));
+      expect(params.get("endTime")).toBe(String(endTime));
+    }
+  );
+
+  it.each([["8h", 8], ["12h", 12]] as const)("requests native Binance %s candles", async (timeframe, hours) => {
+    const openTime = Date.parse("2024-01-01T00:00:00Z");
+    const closeTime = openTime + hours * 3_600_000 - 1;
+    mockedFetch.mockResolvedValueOnce(jsonResponse([[openTime, "100", "105", "95", "101", "123", closeTime]]) as never);
+
+    const provider = new BinanceMarketDataProvider("https://example.test");
+    const candles = await provider.getCandles({ symbol: "BTC", timeframe, startTime: openTime, endTime: closeTime });
+
+    expect(new URL(String(mockedFetch.mock.calls[0][0])).searchParams.get("interval")).toBe(timeframe);
+    expect(candles).toEqual([{ symbol: "BTC", timeframe, openTime, closeTime, open: 100, high: 105, low: 95, close: 101, volume: 123 }]);
+  });
+
   it("combines both market-cap pages into a Top300 list", async () => {
     const row = (rank: number) => ({ id: `coin-${rank}`, symbol: `c${rank}`, name: `Coin ${rank}`, market_cap_rank: rank, market_cap: 1_000 - rank });
     mockedFetch.mockResolvedValueOnce(jsonResponse(Array.from({ length: 250 }, (_, index) => row(index + 1))) as never);

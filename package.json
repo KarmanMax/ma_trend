@@ -4,6 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@9.15.0",
   "scripts": {
+    "start": "node scripts/prepare-local.mjs && pnpm dev",
     "dev": "pnpm --parallel dev",
     "dev:web": "pnpm --filter @trend-trade/web dev",
     "dev:server": "pnpm --filter @trend-trade/server dev",

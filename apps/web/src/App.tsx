@@ -1,4 +1,4 @@
-import { type BacktestConfig, type SymbolCode, type Timeframe } from "@trend-trade/shared";
+import { beijingUtcOffsetHours, defaultDailyCandleStartHour, legacyDailyCandleStartHour, supportsDailyCandleStart, type BacktestConfig, type SymbolCode, type Timeframe } from "@trend-trade/shared";
 import {
   CandlestickSeries,
   ColorType,
@@ -23,24 +23,24 @@ import {
   YAxis
 } from "recharts";
 import { createBacktest, getBacktest, listBacktests, type ApiBacktestDetail, type ApiBacktestRun } from "./lib/api";
-import { formatCurrency, formatDateTime, formatNumber, formatPercent } from "./lib/format";
-import { BacktestForm, defaultMacdStrategy } from "./components/BacktestForm";
+import { formatCurrency, formatDailyCandleStartHour, formatDateTime, formatNumber, formatPercent } from "./lib/format";
+import { BacktestForm, defaultMaStrategy } from "./components/BacktestForm";
 
 
 const defaultConfig: BacktestConfig = {
-  symbol: "ETH",
+  symbol: "BTC",
   timeframe: "1d",
   startTime: defaultStartTime(),
   endTime: defaultEndTime(),
   initialCapital: 10000,
   feeRate: 0.001,
   slippageRate: 0.0005,
-  strategy: defaultMacdStrategy
+  strategy: defaultMaStrategy
 };
 
 
 function defaultEndTime(): string {
-  const end = new Date();
+  const end = new Date(Date.now() + beijingUtcOffsetHours * 3_600_000);
   end.setUTCHours(0, 0, 0, 0);
   return end.toISOString();
 }
@@ -60,6 +60,8 @@ const timeframeLabels: Record<Timeframe, string> = {
   "1h": "1H",
   "2h": "2H",
   "4h": "4H",
+  "8h": "8H",
+  "12h": "12H",
   "1d": "1D",
   "1w": "1W"
 };
@@ -171,7 +173,17 @@ export function App() {
     setLoading(true);
     setError(null);
     try {
-      const backtest = await createBacktest(form);
+      const dailyCandleStartHour = supportsDailyCandleStart(form.symbol, form.timeframe)
+        ? form.dailyCandleStartHour ?? defaultDailyCandleStartHour
+        : undefined;
+      // Date inputs store the selected calendar day at UTC midnight. Submit the actual candle boundary.
+      const offset = dailyCandleStartHour === undefined ? 0 : (dailyCandleStartHour - beijingUtcOffsetHours) * 3_600_000;
+      const backtest = await createBacktest({
+        ...form,
+        dailyCandleStartHour,
+        startTime: new Date(Date.parse(form.startTime) + offset).toISOString(),
+        endTime: new Date(Date.parse(form.endTime) + offset).toISOString()
+      });
       setResult(backtest);
       await refreshRuns();
     } catch (err) {
@@ -214,7 +226,7 @@ export function App() {
   return (
     <main className="min-h-screen bg-background">
       <header className="border-b border-border bg-panel">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
+        <div className="mx-auto flex max-w-[120rem] flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
           <div>
             <h1 className="text-xl font-semibold tracking-normal">Trend Trade</h1>
             <p className="text-sm text-muted">Multi-asset trend backtesting workstation</p>
@@ -230,7 +242,7 @@ export function App() {
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-7xl grid-cols-1 items-start gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[360px_minmax(0,1fr)]">
+      <div className="mx-auto grid max-w-[120rem] grid-cols-1 items-start gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[360px_minmax(0,1fr)]">
         <BacktestForm config={form} onChange={setForm} onSubmit={() => void runBacktest()} loading={loading} error={error}
           symbolLabels={symbolLabels} timeframeLabels={timeframeLabels} />
 
@@ -454,12 +466,25 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
       })));
     }
 
+    const candleCloseTimes = result.chartPoints.map((point) => Date.parse(point.time));
+    const markerTime = (value: string): Time => {
+      const fillTime = Date.parse(value);
+      // The price series is keyed by close time, including for trades filled at the open.
+      let left = 0;
+      let right = candleCloseTimes.length - 1;
+      while (left < right) {
+        const middle = Math.floor((left + right) / 2);
+        if (candleCloseTimes[middle] < fillTime) left = middle + 1;
+        else right = middle;
+      }
+      return candles[left].time;
+    };
     createSeriesMarkers(
       candleSeries,
       result.trades.flatMap((trade) => {
         const markers = [
           {
-            time: toChartTime(trade.entryTime),
+            time: markerTime(trade.entryTime),
             position: trade.side === "SHORT" ? "aboveBar" as const : "belowBar" as const,
             color: trade.side === "SHORT" ? "#b42318" : "#047857",
             shape: trade.side === "SHORT" ? "arrowDown" as const : "arrowUp" as const,
@@ -469,7 +494,7 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
 
         if (trade.exitTime) {
           markers.push({
-            time: toChartTime(trade.exitTime),
+            time: markerTime(trade.exitTime),
             position: trade.side === "SHORT" ? "belowBar" as const : "aboveBar" as const,
             color: "#667085",
             shape: trade.side === "SHORT" ? "arrowUp" as const : "arrowDown" as const,
@@ -478,7 +503,7 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
         }
 
         return markers;
-      })
+      }).sort((left, right) => Number(left.time) - Number(right.time))
     );
 
     chart.timeScale().fitContent();
@@ -510,6 +535,9 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
   return (
     <ChartPanel title="K-Line Strategy View" icon={<BarChart3 size={18} />}>
       <div className="mb-3 flex flex-wrap gap-4 text-xs text-muted">
+        {supportsDailyCandleStart(result.config.symbol, result.config.timeframe) && (
+          <span>Daily candle start {formatDailyCandleStartHour(result.config.dailyCandleStartHour ?? legacyDailyCandleStartHour)} UTC+8</span>
+        )}
         {result.config.strategy.type === "EMA_TREND" ? <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#9333ea]" /> {result.config.strategy.trendMaType ?? "EMA"} {result.config.strategy.trendEmaPeriod}</span> : null}
         <span className="inline-flex items-center gap-1"><span className="h-2 w-4 bg-[#98a2b3]" /> Volume</span>
         {result.config.strategy.type === "MACD_TREND" || result.config.strategy.type === "MACD_MOMENTUM" ? <>
@@ -589,6 +617,11 @@ function RunHistory({ runs, onSelect }: { runs: ApiBacktestRun[]; onSelect: (id:
             <div className="flex items-center justify-between gap-3">
               <span className="font-medium">
                 {run.symbol} {run.timeframe.toUpperCase()}
+                {supportsDailyCandleStart(run.symbol, run.timeframe) && (
+                  <span className="ml-2 text-xs font-normal text-muted">
+                    {formatDailyCandleStartHour(run.dailyCandleStartHour ?? legacyDailyCandleStartHour)} UTC+8
+                  </span>
+                )}
               </span>
               <span className="text-xs text-muted">{formatDateTime(run.createdAt)}</span>
             </div>

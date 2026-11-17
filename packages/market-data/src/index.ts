@@ -1,4 +1,4 @@
-import type { Candle, SymbolCode, Timeframe } from "@trend-trade/shared";
+import { beijingUtcOffsetHours, timeframeMilliseconds, type Candle, type DailyCandleStartHour, type SymbolCode, type Timeframe } from "@trend-trade/shared";
 import { fetch, ProxyAgent } from "undici";
 
 export * from "./crypto";
@@ -6,7 +6,10 @@ export * from "./crypto";
 export type GetCandlesRequest = {
   symbol: SymbolCode;
   timeframe: Timeframe;
+  dailyCandleStartHour?: DailyCandleStartHour;
   startTime: number;
+  /** Candles before this time are optional history for indicator warmup. */
+  requiredStartTime?: number;
   endTime: number;
 };
 
@@ -119,19 +122,6 @@ const yahooSymbolMap: Partial<Record<SymbolCode, string>> = {
   LYTE: "LYTE"
 };
 
-const timeframeMs: Record<Timeframe, number> = {
-  "1m": 60_000,
-  "2m": 2 * 60_000,
-  "5m": 5 * 60_000,
-  "15m": 15 * 60_000,
-  "30m": 30 * 60_000,
-  "1h": 60 * 60_000,
-  "2h": 2 * 60 * 60_000,
-  "4h": 4 * 60 * 60_000,
-  "1d": 24 * 60 * 60_000,
-  "1w": 7 * 24 * 60 * 60_000
-};
-
 export class BinanceMarketDataProvider implements MarketDataProvider {
   private readonly dispatcher?: ProxyAgent;
 
@@ -157,6 +147,9 @@ export class BinanceMarketDataProvider implements MarketDataProvider {
       const url = new URL("/api/v3/klines", this.baseUrl);
       url.searchParams.set("symbol", pair);
       url.searchParams.set("interval", request.timeframe);
+      if (request.timeframe === "1d" && request.dailyCandleStartHour !== undefined) {
+        url.searchParams.set("timeZone", String(beijingUtcOffsetHours - request.dailyCandleStartHour));
+      }
       url.searchParams.set("startTime", String(cursor));
       url.searchParams.set("endTime", String(request.endTime));
       url.searchParams.set("limit", "1000");
@@ -230,9 +223,17 @@ export class YahooFinanceMarketDataProvider implements MarketDataProvider {
       throw new Error(`Symbol ${request.symbol} is not supported by YahooFinanceMarketDataProvider`);
     }
 
-    const sourceTimeframe = request.timeframe === "2h" || request.timeframe === "4h" ? "1h" : request.timeframe;
+    const sourceTimeframe = yahooHourlyAggregates.has(request.timeframe) ? "1h" : request.timeframe;
+    let startTime = request.startTime;
+    if (sourceTimeframe === "1h" && request.requiredStartTime !== undefined) {
+      const interval = timeframeMilliseconds[request.timeframe];
+      const historyLimit = Date.now() - 730 * timeframeMilliseconds["1d"];
+      // Skip the first bucket if Yahoo can only provide part of its history.
+      const firstAvailableBucket = (Math.floor(historyLimit / interval) + 1) * interval;
+      startTime = Math.max(startTime, Math.min(request.requiredStartTime, firstAvailableBucket));
+    }
     const url = new URL(`/v8/finance/chart/${encodeURIComponent(yahooSymbol)}`, this.baseUrl);
-    url.searchParams.set("period1", String(Math.floor(request.startTime / 1000)));
+    url.searchParams.set("period1", String(Math.floor(startTime / 1000)));
     url.searchParams.set("period2", String(Math.floor(request.endTime / 1000)));
     url.searchParams.set("interval", toYahooInterval(sourceTimeframe));
     url.searchParams.set("includePrePost", "false");
@@ -269,7 +270,7 @@ export class YahooFinanceMarketDataProvider implements MarketDataProvider {
         symbol: request.symbol,
         timeframe: sourceTimeframe,
         openTime,
-        closeTime: openTime + timeframeMs[sourceTimeframe] - 1,
+        closeTime: openTime + timeframeMilliseconds[sourceTimeframe] - 1,
         open,
         high,
         low,
@@ -279,7 +280,7 @@ export class YahooFinanceMarketDataProvider implements MarketDataProvider {
     });
 
     const candles = sourceTimeframe === request.timeframe ? sourceCandles : aggregateCandles(sourceCandles, request.timeframe);
-    return candles.filter((candle) => candle.openTime >= request.startTime && candle.openTime <= request.endTime);
+    return candles.filter((candle) => candle.openTime >= startTime && candle.openTime <= request.endTime);
   }
 }
 
@@ -302,6 +303,8 @@ export class RoutedMarketDataProvider implements MarketDataProvider {
   }
 }
 
+const yahooHourlyAggregates = new Set<Timeframe>(["2h", "4h", "8h", "12h"]);
+
 function toYahooInterval(timeframe: Timeframe): string {
   if (timeframe === "1h") {
     return "60m";
@@ -314,7 +317,7 @@ function toYahooInterval(timeframe: Timeframe): string {
 }
 
 function aggregateCandles(candles: Candle[], timeframe: Timeframe): Candle[] {
-  const interval = timeframeMs[timeframe];
+  const interval = timeframeMilliseconds[timeframe];
   const groups = new Map<number, Candle[]>();
 
   for (const candle of candles) {
@@ -330,7 +333,9 @@ function aggregateCandles(candles: Candle[], timeframe: Timeframe): Candle[] {
       symbol: group[0].symbol,
       timeframe,
       openTime,
-      closeTime: openTime + interval - 1,
+      closeTime: timeframe === "8h" || timeframe === "12h"
+        ? Math.max(openTime + interval - 1, group[group.length - 1].closeTime)
+        : openTime + interval - 1,
       open: group[0].open,
       high: Math.max(...group.map((candle) => candle.high)),
       low: Math.min(...group.map((candle) => candle.low)),
