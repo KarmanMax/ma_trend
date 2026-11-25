@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Candle, MacdMomentumStrategyConfig } from "@trend-trade/shared";
-import { MacdMomentumStrategy } from "./index";
+import type { Candle, MacdMomentumStrategyConfig, MacdMomentumTrendStrategyConfig } from "@trend-trade/shared";
+import { MacdMomentumStrategy, MacdMomentumTrendStrategy } from "./index";
 
 const config: MacdMomentumStrategyConfig = {
   type: "MACD_MOMENTUM",
@@ -71,5 +71,63 @@ describe("MACD histogram momentum reversal signals", () => {
     expect(signals(closes, { ...config, direction: "SHORT_ONLY" })[6].type).toBe("CLOSE_SHORT");
     expect(signals(closes, { ...config, zeroFilterEnabled: true, zeroProximityPct: 0 })[6].type).toBe("CLOSE_SHORT");
     expect(signals(closes, { ...config, direction: "SHORT_ONLY", exitTrigger: "NONE" })[6].type).toBe("HOLD");
+  });
+});
+
+const trendConfig: MacdMomentumTrendStrategyConfig = {
+  ...config, type: "MACD_MOMENTUM_TREND", trendEmaPeriod: 4, exitTrigger: "MACD_MOMENTUM_TREND"
+};
+const combinedCloses = [11, 12, 8, 10, 11, 15, 15, 14, 15, 12];
+
+function trendSignals(closes: number[], options: MacdMomentumTrendStrategyConfig = trendConfig) {
+  const bars = candles(closes);
+  const strategy = new MacdMomentumTrendStrategy(bars, options);
+  return bars.map((_, index) => strategy.generateSignal({ candles: bars, index, config: options }));
+}
+
+describe("MACD momentum with EMA trend confirmation", () => {
+  it("trades aligned turns in both directions and ignores wrong-side turns and zero crossings", () => {
+    const result = trendSignals(combinedCloses);
+    expect(result[5]).toMatchObject({ type: "BUY", allowPositionFlip: true });
+    expect(result[6].type).toBe("HOLD"); // Bearish turn with price still above EMA.
+    expect(result[7].type).toBe("HOLD"); // Histogram crosses zero.
+    expect(result[9]).toMatchObject({ type: "SELL_SHORT", allowPositionFlip: true });
+
+    const zeroCross = [10, 10, 10, 9, 10, 10, 13, 13, 11];
+    expect(trendSignals(zeroCross)[8].type).toBe("HOLD"); // Price and histogram both cross down.
+  });
+
+  it("waits for both indicators and treats a close on the EMA as neutral", () => {
+    expect(trendSignals(combinedCloses)[4]).toMatchObject({ type: "HOLD", reason: "Waiting for MACD histogram warmup" });
+    expect(trendSignals(combinedCloses, { ...trendConfig, trendEmaPeriod: 10 })[5])
+      .toMatchObject({ type: "HOLD", reason: "Waiting for EMA trend warmup" });
+    expect(trendSignals(combinedCloses, { ...trendConfig, trendEmaPeriod: 1 })[5].type).toBe("HOLD");
+  });
+
+  it("does not replay a wrong-side turn when the trend aligns on a later bar", () => {
+    const closes = [15, 16, 9, 12, 8, 9, 16];
+    expect(signals(closes)[5].type).toBe("BUY");
+    expect(trendSignals(closes).slice(5).map(({ type }) => type)).toEqual(["HOLD", "HOLD"]);
+  });
+
+  it.each([
+    { direction: "LONG_ONLY" },
+    { zeroFilterEnabled: true, zeroProximityPct: 0 },
+    { adxFilterEnabled: true, adxThreshold: 100 },
+    { volumeFilterEnabled: true, volumeMultiplier: 2 },
+    { levelFilterEnabled: true }
+  ] satisfies Partial<MacdMomentumTrendStrategyConfig>[])("preserves combined exits with %o", (options) => {
+    const strategy = { ...trendConfig, ...options };
+    expect(trendSignals(combinedCloses, strategy)[9].type).toBe("CLOSE_LONG");
+    expect(trendSignals(combinedCloses, { ...strategy, exitTrigger: "NONE" })[9].type).toBe("HOLD");
+  });
+
+  it("rechecks the EMA side and same-side histogram slope before resuming a pending entry", () => {
+    const bars = candles(combinedCloses);
+    const strategy = new MacdMomentumTrendStrategy(bars, { ...trendConfig, lossCooldownBars: 1, resumeEntryAfterCooldown: true });
+    expect(strategy.revalidateEntry(5, "BUY")).toMatchObject({ type: "BUY" });
+    expect(strategy.revalidateEntry(6, "BUY")).toBeNull(); // EMA agrees, slope disagrees.
+    expect(strategy.revalidateEntry(6, "SELL_SHORT")).toBeNull(); // Slope agrees, EMA disagrees.
+    expect(strategy.revalidateEntry(9, "SELL_SHORT")).toMatchObject({ type: "SELL_SHORT" });
   });
 });

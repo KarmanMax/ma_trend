@@ -405,7 +405,7 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
     let macdLineSeries: ReturnType<typeof chart.addSeries> | null = null;
     let macdSignalSeries: ReturnType<typeof chart.addSeries> | null = null;
     let macdHistogramSeries: ReturnType<typeof chart.addSeries> | null = null;
-    if (result.config.strategy.type === "MACD_TREND" || result.config.strategy.type === "MACD_MOMENTUM") {
+    if (result.config.strategy.type !== "EMA_TREND") {
       macdLineSeries = chart.addSeries(LineSeries, {
         color: "#2563eb",
         lineWidth: 2,
@@ -532,15 +532,19 @@ function CandlestickChart({ result }: { result: ApiBacktestDetail | null }) {
     );
   }
 
+  const { strategy } = result.config;
+  const averageLabel = strategy.type === "EMA_TREND" ? `${strategy.trendMaType ?? "EMA"} ${strategy.trendEmaPeriod}`
+    : strategy.type === "MACD_MOMENTUM_TREND" ? `EMA ${strategy.trendEmaPeriod}` : null;
+
   return (
     <ChartPanel title="K-Line Strategy View" icon={<BarChart3 size={18} />}>
       <div className="mb-3 flex flex-wrap gap-4 text-xs text-muted">
         {supportsDailyCandleStart(result.config.symbol, result.config.timeframe) && (
           <span>Daily candle start {formatDailyCandleStartHour(result.config.dailyCandleStartHour ?? legacyDailyCandleStartHour)} UTC+8</span>
         )}
-        {result.config.strategy.type === "EMA_TREND" ? <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#9333ea]" /> {result.config.strategy.trendMaType ?? "EMA"} {result.config.strategy.trendEmaPeriod}</span> : null}
+        {averageLabel && <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#9333ea]" /> {averageLabel}</span>}
         <span className="inline-flex items-center gap-1"><span className="h-2 w-4 bg-[#98a2b3]" /> Volume</span>
-        {result.config.strategy.type === "MACD_TREND" || result.config.strategy.type === "MACD_MOMENTUM" ? <>
+        {strategy.type !== "EMA_TREND" ? <>
           <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#2563eb]" /> MACD</span>
           <span className="inline-flex items-center gap-1"><span className="h-0.5 w-5 bg-[#f59e0b]" /> Signal</span>
         </> : null}

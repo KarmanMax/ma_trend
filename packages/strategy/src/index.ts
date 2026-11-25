@@ -1,8 +1,9 @@
 import { adx, atr, detectPriceZones, ema, macd, priceZoneLookbackBars, sma } from "@trend-trade/indicator";
-import { defaultLevelMinClearanceAtr, type Candle, type EmaTrendStrategyConfig, type EntrySignalType, type MacdMomentumStrategyConfig, type MacdTrendStrategyConfig, type Signal, type StrategyConfig } from "@trend-trade/shared";
+import { defaultLevelMinClearanceAtr, type Candle, type EmaTrendStrategyConfig, type EntrySignalType, type MacdMomentumStrategyConfig, type MacdMomentumTrendStrategyConfig, type MacdTrendStrategyConfig, type Signal, type StrategyConfig } from "@trend-trade/shared";
 import type { IncrementalStrategySession } from "./incremental";
 
 export * from "./incremental";
+export * from "./pump-reversal";
 export * from "./wyckoff";
 
 export type StrategyContext<TConfig extends StrategyConfig = StrategyConfig> = {
@@ -186,7 +187,7 @@ function entrySignal(config: StrategyConfig, referencePrice: number, currentAtr:
 }
 
 function entryFilterFailure(
-  config: EmaTrendStrategyConfig | MacdTrendStrategyConfig | MacdMomentumStrategyConfig,
+  config: StrategyConfig,
   currentAtr: number | null,
   currentAdx: number | null,
   currentVolumeMa: number | null,
@@ -218,7 +219,7 @@ function entryFilterFailure(
 }
 
 function macdEntryFilterFailure(
-  config: MacdTrendStrategyConfig | MacdMomentumStrategyConfig,
+  config: Exclude<StrategyConfig, EmaTrendStrategyConfig>,
   currentLine: number,
   currentAtr: number | null,
   currentAdx: number | null,
@@ -314,22 +315,25 @@ export class MacdTrendStrategy implements Strategy<MacdTrendStrategyConfig> {
   }
 }
 
-export class MacdMomentumStrategy implements Strategy<MacdMomentumStrategyConfig> {
-  readonly id = "MACD_MOMENTUM";
-  readonly name = "MACD Histogram Momentum Reversal";
+abstract class MacdHistogramStrategy<TConfig extends MacdMomentumStrategyConfig | MacdMomentumTrendStrategyConfig> implements Strategy<TConfig> {
+  abstract readonly id: string;
+  abstract readonly name: string;
   private readonly macdSeries: ReturnType<typeof macd>;
+  private readonly trendEmaSeries: Array<number | null> | null;
   private readonly atrSeries: Array<number | null>;
   private readonly adxSeries: Array<number | null>;
   private readonly volumeMaSeries: Array<number | null>;
 
-  constructor(private readonly candles: Candle[], private readonly config: MacdMomentumStrategyConfig) {
-    this.macdSeries = macd(candles.map((candle) => candle.close), config.macdFastPeriod, config.macdSlowPeriod, config.macdSignalPeriod);
+  constructor(private readonly candles: Candle[], private readonly config: TConfig) {
+    const closes = candles.map((candle) => candle.close);
+    this.macdSeries = macd(closes, config.macdFastPeriod, config.macdSlowPeriod, config.macdSignalPeriod);
+    this.trendEmaSeries = config.type === "MACD_MOMENTUM_TREND" ? ema(closes, config.trendEmaPeriod) : null;
     this.atrSeries = atr(candles, config.atrPeriod);
     this.adxSeries = adx(candles, config.adxPeriod);
     this.volumeMaSeries = sma(candles.map((candle) => candle.volume), config.volumeMaPeriod);
   }
 
-  generateSignal({ index }: StrategyContext<MacdMomentumStrategyConfig>): Signal {
+  generateSignal({ index }: StrategyContext<TConfig>): Signal {
     const twoBarsAgo = this.macdSeries.histogram[index - 2];
     const previous = this.macdSeries.histogram[index - 1];
     const current = this.macdSeries.histogram[index];
@@ -349,8 +353,17 @@ export class MacdMomentumStrategy implements Strategy<MacdMomentumStrategyConfig
       return { type: "HOLD", reason: "No MACD histogram fill-state change" };
     }
 
-    const exitEnabled = this.config.exitTrigger === "MACD_MOMENTUM";
-    const reason = turnedUp ? "MACD histogram turned upward" : "MACD histogram turned downward";
+    const type = turnedUp ? "BUY" : "SELL_SHORT";
+    const trendFailure = this.trendFilterFailure(index, type);
+    if (trendFailure) {
+      return { type: "HOLD", reason: trendFailure };
+    }
+
+    const exitEnabled = this.config.exitTrigger === this.config.type;
+    const momentumReason = turnedUp ? "MACD histogram turned upward" : "MACD histogram turned downward";
+    const reason = this.config.type === "MACD_MOMENTUM_TREND"
+      ? `${momentumReason} with close ${turnedUp ? "above" : "below"} EMA${this.config.trendEmaPeriod}`
+      : momentumReason;
     const closeType = turnedUp ? "CLOSE_SHORT" : "CLOSE_LONG";
     const directionExcluded = turnedUp ? this.config.direction === "SHORT_ONLY" : this.config.direction === "LONG_ONLY";
     if (directionExcluded) {
@@ -359,7 +372,6 @@ export class MacdMomentumStrategy implements Strategy<MacdMomentumStrategyConfig
 
     const candle = this.candles[index];
     const currentAtr = this.atrSeries[index];
-    const type = turnedUp ? "BUY" : "SELL_SHORT";
     const filterFailure = macdEntryFilterFailure(this.config, currentLine, currentAtr, this.adxSeries[index], this.volumeMaSeries[index], candle)
       ?? levelEntryFilterFailure(this.config, this.candles, index, type, candle.close);
     if (filterFailure) {
@@ -374,7 +386,7 @@ export class MacdMomentumStrategy implements Strategy<MacdMomentumStrategyConfig
     const previous = this.macdSeries.histogram[index - 1];
     const current = this.macdSeries.histogram[index];
     if (line == null || previous == null || current == null || Math.sign(previous) !== Math.sign(current)
-      || !isEntryDirectionValid(type, current - previous, this.config)) {
+      || !isEntryDirectionValid(type, current - previous, this.config) || this.trendFilterFailure(index, type)) {
       return null;
     }
     const candle = this.candles[index];
@@ -385,6 +397,26 @@ export class MacdMomentumStrategy implements Strategy<MacdMomentumStrategyConfig
     }
     return entrySignal(this.config, candle.close, currentAtr, type, "MACD momentum entry confirmed after cooldown");
   }
+
+  private trendFilterFailure(index: number, type: EntrySignalType): string | null {
+    if (!this.trendEmaSeries) return null;
+    const average = this.trendEmaSeries[index];
+    if (average == null) return "Waiting for EMA trend warmup";
+
+    const close = this.candles[index].close;
+    const aligned = type === "BUY" ? close > average : close < average;
+    return aligned ? null : "Close is not on the required side of the trend EMA";
+  }
+}
+
+export class MacdMomentumStrategy extends MacdHistogramStrategy<MacdMomentumStrategyConfig> {
+  readonly id = "MACD_MOMENTUM";
+  readonly name = "MACD Histogram Momentum Reversal";
+}
+
+export class MacdMomentumTrendStrategy extends MacdHistogramStrategy<MacdMomentumTrendStrategyConfig> {
+  readonly id = "MACD_MOMENTUM_TREND";
+  readonly name = "MACD Momentum + EMA Trend";
 }
 
 export function createDefaultStrategyRegistry(candles: Candle[]): StrategyRegistry {
@@ -392,5 +424,6 @@ export function createDefaultStrategyRegistry(candles: Candle[]): StrategyRegist
   registry.register("EMA_TREND", (config) => new EmaTrendStrategy(candles, config));
   registry.register("MACD_TREND", (config) => new MacdTrendStrategy(candles, config));
   registry.register("MACD_MOMENTUM", (config) => new MacdMomentumStrategy(candles, config));
+  registry.register("MACD_MOMENTUM_TREND", (config) => new MacdMomentumTrendStrategy(candles, config));
   return registry;
 }

@@ -2,7 +2,7 @@ import { SimulatedExecutionEngine, type ExecutionEngine } from "@trend-trade/exe
 import { adx, atr, calculateDrawdownCurve, calculateMetrics, ema, macd, priceZoneLookbackBars, sma } from "@trend-trade/indicator";
 import type { MarketDataProvider } from "@trend-trade/market-data";
 import { SimulatedPortfolio, type Portfolio } from "@trend-trade/portfolio";
-import { timeframeMilliseconds, type BacktestChartPoint, type BacktestConfig, type BacktestResult, type Candle, type EmaTrendStrategyConfig, type MacdMomentumStrategyConfig, type MacdTrendStrategyConfig, type Signal } from "@trend-trade/shared";
+import { timeframeMilliseconds, type BacktestChartPoint, type BacktestConfig, type BacktestResult, type Candle, type EmaTrendStrategyConfig, type Signal, type StrategyConfig } from "@trend-trade/shared";
 import { createDefaultStrategyRegistry, createStrategyConfigKey, IncrementalStrategyRunner, type StrategyFactory } from "@trend-trade/strategy";
 
 export * from "./incremental";
@@ -31,7 +31,7 @@ export class BacktestEngine {
   async run(config: BacktestConfig): Promise<BacktestResult> {
     const rangeStart = Date.parse(config.startTime);
     const rangeEnd = Date.parse(config.endTime);
-    const requiresClosedBar = config.strategy.type === "EMA_TREND"
+    const requiresClosedBar = config.strategy.type === "EMA_TREND" || config.strategy.type === "MACD_MOMENTUM_TREND"
       || config.strategy.levelFilterEnabled || config.dailyCandleStartHour !== undefined || config.timeframe === "8h" || config.timeframe === "12h";
     const lastClose = Math.min(rangeEnd, Date.now());
     const candles = (await this.marketDataProvider.getCandles({
@@ -116,9 +116,9 @@ export class BacktestEngine {
       timeframe: config.timeframe
     });
     const chartPoints = runner ? createBaseChartPoints(processedCandles)
-      : config.strategy.type === "MACD_TREND" || config.strategy.type === "MACD_MOMENTUM"
-        ? createMacdChartPoints(candles, config.strategy).filter((_, index) => candles[index].openTime >= rangeStart)
-        : createTrendChartPoints(candles, config.strategy).filter((_, index) => candles[index].openTime >= rangeStart);
+      : (config.strategy.type === "EMA_TREND"
+        ? createTrendChartPoints(candles, config.strategy)
+        : createMacdChartPoints(candles, config.strategy)).filter((_, index) => candles[index].openTime >= rangeStart);
 
     return {
       config,
@@ -133,9 +133,12 @@ export class BacktestEngine {
 }
 
 function calculateWarmupStart(config: BacktestConfig, rangeStart: number): number {
-  const strategyPeriod = config.strategy.type === "EMA_TREND"
-    ? config.strategy.trendEmaPeriod
-    : config.strategy.macdSlowPeriod + config.strategy.macdSignalPeriod;
+  const { strategy } = config;
+  const strategyPeriod = strategy.type === "EMA_TREND"
+    ? strategy.trendEmaPeriod
+    : strategy.type === "MACD_MOMENTUM_TREND"
+      ? Math.max(strategy.trendEmaPeriod, strategy.macdSlowPeriod + strategy.macdSignalPeriod + 1)
+      : strategy.macdSlowPeriod + strategy.macdSignalPeriod;
   const longestPeriod = Math.max(
     strategyPeriod,
     config.strategy.atrPeriod,
@@ -180,15 +183,18 @@ function createTrendChartPoints(candles: Candle[], config: EmaTrendStrategyConfi
   }));
 }
 
-function createMacdChartPoints(candles: Candle[], config: MacdTrendStrategyConfig | MacdMomentumStrategyConfig): BacktestChartPoint[] {
+function createMacdChartPoints(candles: Candle[], config: Exclude<StrategyConfig, EmaTrendStrategyConfig>): BacktestChartPoint[] {
   const basePoints = createBaseChartPoints(candles);
-  const series = macd(candles.map((candle) => candle.close), config.macdFastPeriod, config.macdSlowPeriod, config.macdSignalPeriod);
+  const closes = candles.map((candle) => candle.close);
+  const series = macd(closes, config.macdFastPeriod, config.macdSlowPeriod, config.macdSignalPeriod);
+  const trendEma = config.type === "MACD_MOMENTUM_TREND" ? ema(closes, config.trendEmaPeriod) : null;
   const atrSeries = atr(candles, config.atrPeriod);
   const adxSeries = adx(candles, config.adxPeriod);
   const volumeMa = sma(candles.map((candle) => candle.volume), config.volumeMaPeriod);
 
   return candles.map((_, index) => ({
     ...basePoints[index],
+    ...(trendEma ? { trendEma: trendEma[index] ?? undefined } : {}),
     macdLine: series.line[index] ?? undefined,
     macdSignal: series.signal[index] ?? undefined,
     macdHistogram: series.histogram[index] ?? undefined,

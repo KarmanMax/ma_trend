@@ -4,6 +4,7 @@ import {
   dailyCandleStartHours,
   defaultDailyCandleStartHour,
   defaultLevelMinClearanceAtr,
+  defaultMomentumTrendEmaPeriod,
   supportsDailyCandleStart,
   supportedSymbols,
   supportedTimeframes,
@@ -55,7 +56,9 @@ const defaultMacdStrategy: MacdTrendStrategyConfig = {
   exitTrigger: "MACD"
 };
 
-function switchTrendStrategy(current: StrategyConfig, indicator: string): StrategyConfig {
+type SignalModel = "MA" | "EMA" | "MACD" | "MACD_MOMENTUM" | "MACD_MOMENTUM_TREND";
+
+function switchTrendStrategy(current: StrategyConfig, indicator: SignalModel): StrategyConfig {
   const common = {
     atrPeriod: current.atrPeriod,
     atrMultiplier: current.atrMultiplier,
@@ -72,14 +75,28 @@ function switchTrendStrategy(current: StrategyConfig, indicator: string): Strate
     resumeEntryAfterCooldown: current.resumeEntryAfterCooldown,
     direction: current.direction
   };
-  if (indicator === "MACD" || indicator === "MACD_MOMENTUM") {
+  const noSignalExit = current.exitTrigger === "NONE";
+  if (indicator !== "MA" && indicator !== "EMA") {
     const macd = current.type === "EMA_TREND" ? defaultMacdStrategy : current;
-    return {
-      ...macd,
+    const macdFields = {
       ...common,
-      type: indicator === "MACD" ? "MACD_TREND" : "MACD_MOMENTUM",
-      exitTrigger: current.exitTrigger === "NONE" ? "NONE" : indicator === "MACD" ? "MACD" : "MACD_MOMENTUM"
-    } as StrategyConfig;
+      macdFastPeriod: macd.macdFastPeriod,
+      macdSlowPeriod: macd.macdSlowPeriod,
+      macdSignalPeriod: macd.macdSignalPeriod,
+      zeroFilterEnabled: macd.zeroFilterEnabled,
+      zeroProximityPct: macd.zeroProximityPct
+    };
+    if (indicator === "MACD_MOMENTUM_TREND") {
+      return {
+        ...macdFields,
+        type: indicator,
+        trendEmaPeriod: current.type === indicator ? current.trendEmaPeriod : defaultMomentumTrendEmaPeriod,
+        exitTrigger: noSignalExit ? "NONE" : indicator
+      };
+    }
+    return indicator === "MACD"
+      ? { ...macdFields, type: "MACD_TREND", exitTrigger: noSignalExit ? "NONE" : "MACD" }
+      : { ...macdFields, type: indicator, exitTrigger: noSignalExit ? "NONE" : indicator };
   }
   return {
     ...defaultMaStrategy,
@@ -91,8 +108,8 @@ function switchTrendStrategy(current: StrategyConfig, indicator: string): Strate
       keepCooldownSignalsByDirection: current.keepCooldownSignalsByDirection,
       filterExtendedCooldownEntries: current.filterExtendedCooldownEntries
     } : {}),
-    trendMaType: indicator as "MA" | "EMA",
-    exitTrigger: current.exitTrigger === "NONE" ? "NONE" : "EMA"
+    trendMaType: indicator,
+    exitTrigger: noSignalExit ? "NONE" : "EMA"
   };
 }
 
@@ -118,7 +135,7 @@ export function BacktestForm({ config, onChange, onSubmit, loading, error, symbo
   const lossCooldownBars = strategy.lossCooldownBars ?? 0;
   const enabledFilters = [strategy.atrStopEnabled, strategy.adxFilterEnabled, strategy.volumeFilterEnabled,
     strategy.levelFilterEnabled, lossCooldownBars > 0].filter(Boolean).length;
-  const reverseExit = strategy.type === "EMA_TREND" ? "EMA" : strategy.type === "MACD_TREND" ? "MACD" : "MACD_MOMENTUM";
+  const reverseExit = strategy.type === "EMA_TREND" ? "EMA" : strategy.type === "MACD_TREND" ? "MACD" : strategy.type;
 
   function updateStrategy(patch: Partial<StrategyConfig>) {
     onChange({ ...config, strategy: { ...strategy, ...patch } as StrategyConfig });
@@ -186,12 +203,13 @@ export function BacktestForm({ config, onChange, onSubmit, loading, error, symbo
           <section className="form-section" aria-labelledby="strategy-heading">
             <SectionHeading id="strategy-heading" label="Strategy" icon={<Activity size={14} />} />
             <Field label="Signal model">
-              <select className="input" value={strategy.type === "EMA_TREND" ? strategy.trendMaType ?? "EMA" : strategy.type === "MACD_TREND" ? "MACD" : "MACD_MOMENTUM"}
-                onChange={(event) => onChange({ ...config, strategy: switchTrendStrategy(strategy, event.target.value) })}>
+              <select className="input" value={strategy.type === "EMA_TREND" ? strategy.trendMaType ?? "EMA" : reverseExit}
+                onChange={(event) => onChange({ ...config, strategy: switchTrendStrategy(strategy, event.target.value as SignalModel) })}>
                 <option value="MA">MA</option>
                 <option value="EMA">EMA</option>
                 <option value="MACD">MACD · Signal crossover</option>
                 <option value="MACD_MOMENTUM">MACD · Momentum reversal</option>
+                <option value="MACD_MOMENTUM_TREND">MACD · Momentum + EMA trend</option>
               </select>
             </Field>
 
@@ -211,9 +229,11 @@ export function BacktestForm({ config, onChange, onSubmit, loading, error, symbo
                 </div>
                 {invalidMacdPeriods ? <p id={macdErrorId} role="alert" className="mt-2 text-xs text-negative">Fast period must be smaller than slow period.</p> : null}
                 <p className="mt-3 text-xs leading-relaxed text-muted">
-                  {strategy.type === "MACD_MOMENTUM"
-                    ? "Trade when the histogram turns upward or downward on the same side of zero."
-                    : "A golden cross opens long; a death cross opens short."}
+                  {strategy.type === "MACD_TREND"
+                    ? "A golden cross opens long; a death cross opens short."
+                    : strategy.type === "MACD_MOMENTUM_TREND"
+                      ? "A same-side histogram turn and the matching side of the EMA must align at the same close."
+                      : "Trade when the histogram turns upward or downward on the same side of zero."}
                 </p>
                 <div className="mt-3 border-t border-blue-100 pt-3">
                   <ToggleField label="Near-zero entries" description="Limit entries to signals close to the zero line." checked={macd.zeroFilterEnabled}
@@ -245,6 +265,11 @@ export function BacktestForm({ config, onChange, onSubmit, loading, error, symbo
               </>
             ) : null}
 
+            {strategy.type === "MACD_MOMENTUM_TREND" && (
+              <NumberField label="Trend EMA period" value={strategy.trendEmaPeriod} min={1} suffix="bars"
+                onChange={(value) => updateStrategy({ trendEmaPeriod: value })} />
+            )}
+
             <fieldset className="min-w-0">
               <legend className="form-label mb-1.5">Trade direction</legend>
               <div className="direction-control">
@@ -262,7 +287,7 @@ export function BacktestForm({ config, onChange, onSubmit, loading, error, symbo
             </fieldset>
             <Field label="Exit rule">
               <select className="input" value={strategy.exitTrigger} onChange={(event) => updateStrategy({ exitTrigger: event.target.value as StrategyConfig["exitTrigger"] })}>
-                <option value={reverseExit}>On opposite signal</option>
+                <option value={reverseExit}>{strategy.type === "MACD_MOMENTUM_TREND" ? "On opposite combined signal" : "On opposite signal"}</option>
                 <option value="NONE">No signal exit</option>
               </select>
             </Field>

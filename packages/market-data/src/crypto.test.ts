@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fetch } from "undici";
-import { BinanceSpotDailyProvider, CoinGeckoTop300Provider } from "./crypto";
+import { BinanceSpotDailyProvider, BinanceUsdtPerpetualProvider, CoinGeckoTop300Provider } from "./crypto";
 import { BinanceMarketDataProvider } from "./index";
 
 vi.mock("undici", () => ({ fetch: vi.fn(), ProxyAgent: class {} }));
@@ -70,5 +70,22 @@ describe("dynamic crypto market data", () => {
     expect(candles).toHaveLength(1);
     expect(candles[0]).toMatchObject({ symbol: "bitcoin", timeframe: "1d", close: 101, volume: 123 });
     expect(String(mockedFetch.mock.calls[1][0])).toContain("symbol=BTCUSDT");
+  });
+
+  it("lists USDT perpetual pairs and excludes an unfinished 15m bar", async () => {
+    mockedFetch.mockResolvedValueOnce(jsonResponse({ symbols: [
+      { symbol: "PIEVERSEUSDT", status: "TRADING", contractType: "PERPETUAL", baseAsset: "PIEVERSE", quoteAsset: "USDT" },
+      { symbol: "BTCUSDT_261225", status: "TRADING", contractType: "CURRENT_QUARTER", baseAsset: "BTC", quoteAsset: "USDT" }
+    ] }) as never);
+    const provider = new BinanceUsdtPerpetualProvider("https://example.test");
+    expect(await provider.listPairs()).toEqual(new Map([["PIEVERSE", "PIEVERSEUSDT"]]));
+
+    const kline = (open: number, close: number) => [open, "100", "105", "95", "101", "123", close];
+    mockedFetch.mockResolvedValueOnce(jsonResponse([kline(0, 899_999), kline(900_000, 1_799_999)]) as never);
+    const candles = await provider.getCandles({ symbol: "PIEVERSE", pair: "PIEVERSEUSDT", startTime: 0, endTime: 1_000_000 });
+
+    expect(candles).toHaveLength(1);
+    expect(candles[0]).toMatchObject({ symbol: "PIEVERSE", timeframe: "15m", close: 101, volume: 123 });
+    expect(String(mockedFetch.mock.calls[1][0])).toContain("/fapi/v1/klines");
   });
 });

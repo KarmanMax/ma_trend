@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MarketDataProvider } from "@trend-trade/market-data";
-import { defaultWyckoffStrategyConfig, wyckoffStrategyConfigSchema, type BacktestConfig, type Candle, type EmaTrendStrategyConfig } from "@trend-trade/shared";
+import { defaultWyckoffStrategyConfig, timeframeMilliseconds, wyckoffStrategyConfigSchema, type BacktestConfig, type Candle, type EmaTrendStrategyConfig, type MacdMomentumTrendStrategyConfig } from "@trend-trade/shared";
 import { StrategyRegistry, WyckoffStrategy, type IncrementalStrategySession } from "@trend-trade/strategy";
 import { BacktestEngine, runIncrementalBacktest } from "./index";
 
@@ -28,6 +28,18 @@ const config: BacktestConfig = {
     direction: "LONG_SHORT",
     exitTrigger: "EMA"
   }
+};
+
+const momentumTrend: MacdMomentumTrendStrategyConfig = {
+  ...config.strategy,
+  type: "MACD_MOMENTUM_TREND",
+  trendEmaPeriod: 4,
+  macdFastPeriod: 2,
+  macdSlowPeriod: 3,
+  macdSignalPeriod: 2,
+  zeroFilterEnabled: false,
+  zeroProximityPct: 0.5,
+  exitTrigger: "MACD_MOMENTUM_TREND"
 };
 
 function candle(index: number, close: number): Candle {
@@ -302,6 +314,69 @@ describe("backtest strategy paths", () => {
     expect(result.trades[0]).toMatchObject({ side: "LONG", entryTime: bars[6].closeTime, exitTime: bars[7].closeTime });
     expect(result.trades[1]).toMatchObject({ side: "SHORT", entryTime: bars[7].closeTime });
     expect(result.chartPoints[6].macdHistogram).toBeGreaterThan(result.chartPoints[5].macdHistogram!);
+  });
+
+  it("uses closed bars for combined signals and plots the EMA and MACD from warmup history", async () => {
+    const bars = [11, 12, 8, 10, 11, 15, 15, 14, 15, 12, 9].map((close, index) => candle(index - 5, close));
+    const start = Date.parse(config.startTime);
+    const marketData: MarketDataProvider = {
+      getCandles: async (request) => {
+        expect(request.startTime).toBe(start - 60 * timeframeMilliseconds["1d"]);
+        return bars;
+      }
+    };
+    const engine = new BacktestEngine(marketData);
+    const runConfig = { ...config, endTime: new Date(bars[10].openTime).toISOString() };
+    const result = await engine.run({ ...runConfig, strategy: momentumTrend });
+
+    expect(result.chartPoints.map(({ time }) => time)).toEqual(bars.slice(5, 10).map(({ closeTime }) => closeTime));
+    expect(result.chartPoints[0]).toMatchObject({
+      trendEma: expect.closeTo(12.33), macdLine: expect.any(Number),
+      macdSignal: expect.any(Number), macdHistogram: expect.any(Number)
+    });
+    expect(result.trades).toEqual([
+      expect.objectContaining({ side: "LONG", entryTime: bars[5].closeTime, exitTime: bars[9].closeTime, exitReason: "SIGNAL" }),
+      expect.objectContaining({ side: "SHORT", entryTime: bars[9].closeTime })
+    ]);
+
+    const noExit = await engine.run({ ...runConfig, strategy: { ...momentumTrend, exitTrigger: "NONE" } });
+    expect(noExit.trades).toHaveLength(1);
+    expect(noExit.trades[0]).toMatchObject({ side: "LONG", exitReason: "END_OF_BACKTEST" });
+
+    const thinVolume = bars.map((bar, index) => index === 9 ? { ...bar, volume: 1 } : bar);
+    const filtered = await new BacktestEngine(provider(thinVolume)).run({
+      ...runConfig, strategy: { ...momentumTrend, volumeFilterEnabled: true }
+    });
+    expect(filtered.trades).toHaveLength(1);
+    expect(filtered.trades[0]).toMatchObject({ side: "LONG", exitTime: bars[9].closeTime, exitReason: "SIGNAL" });
+  });
+
+  it("requests the longer EMA or level filter history for the combined strategy", async () => {
+    const start = Date.parse(config.startTime);
+    for (const [levelFilterEnabled, warmupDays] of [[false, 600], [true, 1200]] as const) {
+      const marketData: MarketDataProvider = {
+        getCandles: async ({ startTime }) => {
+          expect(startTime).toBe(start - warmupDays * timeframeMilliseconds["1d"]);
+          return [candle(0, 10)];
+        }
+      };
+      await new BacktestEngine(marketData).run({
+        ...config, strategy: { ...momentumTrend, trendEmaPeriod: 60, levelFilterEnabled }
+      });
+    }
+  });
+
+  it("only resumes a cooldown-blocked combined entry when the user opts in", async () => {
+    const bars = [16, 15, 8, 16, 10, 15, 12, 11, 9].map((close, index) => candle(index - 2, close));
+    const engine = new BacktestEngine(provider(bars));
+    const strategy = { ...momentumTrend, lossCooldownBars: 1 };
+    const original = await engine.run({ ...config, strategy });
+    const resumed = await engine.run({ ...config, strategy: { ...strategy, resumeEntryAfterCooldown: true } });
+
+    expect(original.trades).toHaveLength(1);
+    expect(original.trades[0]).toMatchObject({ side: "LONG", exitTime: bars[6].closeTime, exitReason: "SIGNAL" });
+    expect(resumed.trades).toHaveLength(2);
+    expect(resumed.trades[1]).toMatchObject({ side: "SHORT", entryTime: bars[8].closeTime, entryPrice: 9 });
   });
 
   it("executes a Wyckoff entry and invalidation using the independent incremental backtest path", () => {

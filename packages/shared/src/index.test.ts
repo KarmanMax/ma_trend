@@ -22,7 +22,7 @@ const input = {
 };
 
 describe("MACD backtest config", () => {
-  it.each(["EMA_TREND", "MACD_TREND", "MACD_MOMENTUM"])("parses the support and resistance filter for %s", (type) => {
+  it.each(["EMA_TREND", "MACD_TREND", "MACD_MOMENTUM", "MACD_MOMENTUM_TREND"])("parses the support and resistance filter for %s", (type) => {
     const strategy = { ...input.strategy, type, levelFilterEnabled: true, levelMinClearanceAtr: 1.5 };
     expect(backtestConfigSchema.parse({ ...input, strategy }).strategy).toMatchObject({
       levelFilterEnabled: true, levelMinClearanceAtr: 1.5
@@ -49,7 +49,7 @@ describe("MACD backtest config", () => {
     expect(backtestConfigSchema.safeParse({ ...input, strategy: { ...strategy, trendTriggerMode: "OPEN" } }).success)
       .toBe(false);
   });
-  it.each(["EMA_TREND", "MACD_TREND", "MACD_MOMENTUM"])("accepts optional whole-bar cooldowns for %s", (type) => {
+  it.each(["EMA_TREND", "MACD_TREND", "MACD_MOMENTUM", "MACD_MOMENTUM_TREND"])("accepts optional whole-bar cooldowns for %s", (type) => {
     const withCooldown = (lossCooldownBars?: number) => ({
       ...input, strategy: { ...input.strategy, type, lossCooldownBars }
     });
@@ -84,5 +84,26 @@ describe("MACD backtest config", () => {
       macdSignalPeriod: 9,
       exitTrigger: "MACD_MOMENTUM"
     });
+  });
+
+  it("defaults the MACD momentum trend periods and combined exit rule", () => {
+    const strategy = { ...input.strategy, type: "MACD_MOMENTUM_TREND" };
+    expect(backtestConfigSchema.parse({ ...input, strategy }).strategy).toMatchObject({
+      type: "MACD_MOMENTUM_TREND",
+      trendEmaPeriod: 60,
+      macdFastPeriod: 12,
+      macdSlowPeriod: 26,
+      macdSignalPeriod: 9,
+      exitTrigger: "MACD_MOMENTUM_TREND"
+    });
+    expect(backtestConfigSchema.parse({
+      ...input, strategy: { ...strategy, trendEmaPeriod: 30, exitTrigger: "NONE" }
+    }).strategy).toMatchObject({ trendEmaPeriod: 30, exitTrigger: "NONE" });
+    for (const patch of [
+      { trendEmaPeriod: 0 }, { trendEmaPeriod: 2.5 }, { macdFastPeriod: 26 },
+      { macdSignalPeriod: 0 }, { exitTrigger: "MACD_MOMENTUM" }
+    ]) {
+      expect(backtestConfigSchema.safeParse({ ...input, strategy: { ...strategy, ...patch } }).success).toBe(false);
+    }
   });
 });

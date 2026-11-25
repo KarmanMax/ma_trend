@@ -27,6 +27,16 @@ type ExchangeInfo = {
   }>;
 };
 
+type FuturesExchangeInfo = {
+  symbols: Array<{
+    symbol: string;
+    status: string;
+    contractType: string;
+    baseAsset: string;
+    quoteAsset: string;
+  }>;
+};
+
 type BinanceKline = [number, string, string, string, string, string, number, ...unknown[]];
 
 function proxyDispatcher(): ProxyAgent | undefined {
@@ -108,6 +118,56 @@ export class BinanceSpotDailyProvider {
       candles.push(...rows.map((row) => ({
         symbol: input.coinId,
         timeframe: "1d" as const,
+        openTime: row[0],
+        closeTime: row[6],
+        open: Number(row[1]),
+        high: Number(row[2]),
+        low: Number(row[3]),
+        close: Number(row[4]),
+        volume: Number(row[5])
+      })));
+      cursor = rows[rows.length - 1][6] + 1;
+      if (rows.length < 1000) break;
+    }
+    return candles.filter((candle) => candle.openTime >= input.startTime && candle.closeTime <= input.endTime);
+  }
+}
+
+export class BinanceUsdtPerpetualProvider {
+  private readonly dispatcher = proxyDispatcher();
+
+  constructor(private readonly baseUrl = "https://fapi.binance.com") {}
+
+  async listPairs(): Promise<Map<string, string>> {
+    const response = await fetch(new URL("/fapi/v1/exchangeInfo", this.baseUrl), this.dispatcher ? { dispatcher: this.dispatcher } : undefined);
+    if (!response.ok) {
+      throw new Error(`Binance futures exchange info request failed: ${response.status} ${response.statusText}`);
+    }
+    const data = (await response.json()) as FuturesExchangeInfo;
+    return new Map(data.symbols
+      .filter((item) => item.status === "TRADING" && item.contractType === "PERPETUAL" && item.quoteAsset === "USDT")
+      .map((item) => [item.baseAsset, item.symbol]));
+  }
+
+  async getCandles(input: { symbol: string; pair: string; startTime: number; endTime: number }): Promise<Candle[]> {
+    const candles: Candle[] = [];
+    let cursor = input.startTime;
+    while (cursor < input.endTime) {
+      const url = new URL("/fapi/v1/klines", this.baseUrl);
+      url.searchParams.set("symbol", input.pair);
+      url.searchParams.set("interval", "15m");
+      url.searchParams.set("startTime", String(cursor));
+      url.searchParams.set("endTime", String(input.endTime));
+      url.searchParams.set("limit", "1000");
+      const response = await fetch(url, this.dispatcher ? { dispatcher: this.dispatcher } : undefined);
+      if (!response.ok) {
+        throw new Error(`Binance futures kline request failed for ${input.pair}: ${response.status} ${response.statusText}`);
+      }
+      const rows = (await response.json()) as BinanceKline[];
+      if (rows.length === 0) break;
+      candles.push(...rows.map((row) => ({
+        symbol: input.symbol,
+        timeframe: "15m" as const,
         openTime: row[0],
         closeTime: row[6],
         open: Number(row[1]),

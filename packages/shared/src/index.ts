@@ -261,7 +261,13 @@ export type MacdMomentumStrategyConfig = MacdStrategyConfigBase & {
   exitTrigger: "MACD_MOMENTUM" | "NONE";
 };
 
-export type StrategyConfig = EmaTrendStrategyConfig | MacdTrendStrategyConfig | MacdMomentumStrategyConfig;
+export type MacdMomentumTrendStrategyConfig = MacdStrategyConfigBase & {
+  type: "MACD_MOMENTUM_TREND";
+  trendEmaPeriod: number;
+  exitTrigger: "MACD_MOMENTUM_TREND" | "NONE";
+};
+
+export type StrategyConfig = EmaTrendStrategyConfig | MacdTrendStrategyConfig | MacdMomentumStrategyConfig | MacdMomentumTrendStrategyConfig;
 
 export const defaultWyckoffStrategyConfig = {
   type: "WYCKOFF_SOS_LPS",
@@ -334,6 +340,7 @@ export type BacktestResult = {
 
 const lossCooldownBarsSchema = z.number().int().nonnegative().safe().optional();
 export const defaultLevelMinClearanceAtr = 1;
+export const defaultMomentumTrendEmaPeriod = 60;
 const levelFilterFields = {
   levelFilterEnabled: z.boolean().optional(),
   levelMinClearanceAtr: z.number().finite().min(0.1).optional()
@@ -368,9 +375,8 @@ const emaTrendStrategyConfigSchema = z.object({
   trendEmaPeriod: value.trendEmaPeriod ?? value.emaSlow ?? 200
 }));
 
-const macdTrendStrategyConfigSchema = z.object({
+const macdStrategyConfigBaseSchema = z.object({
   ...levelFilterFields,
-  type: z.literal("MACD_TREND"),
   macdFastPeriod: z.number().int().positive().default(12),
   macdSlowPeriod: z.number().int().positive().default(26),
   macdSignalPeriod: z.number().int().positive().default(9),
@@ -387,38 +393,33 @@ const macdTrendStrategyConfigSchema = z.object({
   volumeFilterEnabled: z.boolean().default(false),
   lossCooldownBars: lossCooldownBarsSchema,
   resumeEntryAfterCooldown: z.boolean().optional(),
-  direction: z.enum(["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT"]),
-  exitTrigger: z.enum(["MACD", "NONE"]).default("MACD")
-}).refine((value) => value.macdFastPeriod < value.macdSlowPeriod, {
-  message: "macdFastPeriod must be less than macdSlowPeriod",
-  path: ["macdFastPeriod"]
+  direction: z.enum(["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT"])
 });
 
-const macdMomentumStrategyConfigSchema = z.object({
-  ...levelFilterFields,
-  type: z.literal("MACD_MOMENTUM"),
-  macdFastPeriod: z.number().int().positive().default(12),
-  macdSlowPeriod: z.number().int().positive().default(26),
-  macdSignalPeriod: z.number().int().positive().default(9),
-  zeroFilterEnabled: z.boolean().default(false),
-  zeroProximityPct: z.number().min(0).max(100).default(0.5),
-  atrPeriod: z.number().int().positive(),
-  atrMultiplier: z.number().positive(),
-  atrStopEnabled: z.boolean().default(false),
-  adxPeriod: z.number().int().positive(),
-  adxThreshold: z.number().min(0).max(100),
-  adxFilterEnabled: z.boolean().default(false),
-  volumeMaPeriod: z.number().int().positive(),
-  volumeMultiplier: z.number().positive(),
-  volumeFilterEnabled: z.boolean().default(false),
-  lossCooldownBars: lossCooldownBarsSchema,
-  resumeEntryAfterCooldown: z.boolean().optional(),
-  direction: z.enum(["LONG_ONLY", "SHORT_ONLY", "LONG_SHORT"]),
-  exitTrigger: z.enum(["MACD_MOMENTUM", "NONE"]).default("MACD_MOMENTUM")
-}).refine((value) => value.macdFastPeriod < value.macdSlowPeriod, {
+function validMacdPeriods(value: { macdFastPeriod: number; macdSlowPeriod: number }): boolean {
+  return value.macdFastPeriod < value.macdSlowPeriod;
+}
+
+const macdPeriodError = {
   message: "macdFastPeriod must be less than macdSlowPeriod",
   path: ["macdFastPeriod"]
-});
+};
+
+const macdTrendStrategyConfigSchema = macdStrategyConfigBaseSchema.extend({
+  type: z.literal("MACD_TREND"),
+  exitTrigger: z.enum(["MACD", "NONE"]).default("MACD")
+}).refine(validMacdPeriods, macdPeriodError);
+
+const macdMomentumStrategyConfigSchema = macdStrategyConfigBaseSchema.extend({
+  type: z.literal("MACD_MOMENTUM"),
+  exitTrigger: z.enum(["MACD_MOMENTUM", "NONE"]).default("MACD_MOMENTUM")
+}).refine(validMacdPeriods, macdPeriodError);
+
+const macdMomentumTrendStrategyConfigSchema = macdStrategyConfigBaseSchema.extend({
+  type: z.literal("MACD_MOMENTUM_TREND"),
+  trendEmaPeriod: z.number().int().positive().safe().default(defaultMomentumTrendEmaPeriod),
+  exitTrigger: z.enum(["MACD_MOMENTUM_TREND", "NONE"]).default("MACD_MOMENTUM_TREND")
+}).refine(validMacdPeriods, macdPeriodError);
 
 export const backtestConfigSchema = z.object({
   symbol: z.enum(supportedSymbols),
@@ -432,7 +433,9 @@ export const backtestConfigSchema = z.object({
   initialCapital: z.number().positive(),
   feeRate: z.number().min(0).max(0.1),
   slippageRate: z.number().min(0).max(0.1),
-  strategy: z.union([emaTrendStrategyConfigSchema, macdTrendStrategyConfigSchema, macdMomentumStrategyConfigSchema])
+  strategy: z.union([
+    emaTrendStrategyConfigSchema, macdTrendStrategyConfigSchema, macdMomentumStrategyConfigSchema, macdMomentumTrendStrategyConfigSchema
+  ])
 }).refine((value) => Date.parse(value.startTime) < Date.parse(value.endTime), {
   message: "startTime must be before endTime",
   path: ["startTime"]
